@@ -1,30 +1,74 @@
 import SwiftUI
 import AppKit
+import Combine
+import Carbon.HIToolbox
+import ScreenCaptureKit
 import CoreGraphics
 import QuartzCore
 import ImageIO
 import UniformTypeIdentifiers
-import Carbon.HIToolbox
+
+// MARK: - App Services (singletons to simplify wiring)
+
+final class AppServices {
+    static let shared = AppServices()
+
+    let prefs = Preferences()
+    let hotkeys = HotkeyManager()
+    let shots = ScreenshotManager()
+
+    private var cs = Set<AnyCancellable>()
+
+    private init() {
+        // Rebind hotkeys whenever prefs change.
+        prefs.$selectionHotkey.merge(with: prefs.$windowHotkey, prefs.$screenHotkey)
+            .sink { [weak self] _ in self?.rebindHotkeys() }
+            .store(in: &cs)
+
+        // Initial setup
+        shots.refreshSaveDirectory()
+        rebindHotkeys()
+    }
+
+    func rebindHotkeys() {
+        hotkeys.unregisterAll()
+        if let hk = prefs.selectionHotkey { hotkeys.register(id: .selection, hotkey: hk) { [weak self] in self?.shots.captureSelection() } }
+        if let hk = prefs.windowHotkey    { hotkeys.register(id: .window,    hotkey: hk) { [weak self] in self?.shots.captureActiveWindow() } }
+        if let hk = prefs.screenHotkey    { hotkeys.register(id: .screen,    hotkey: hk) { [weak self] in self?.shots.captureFullScreens() } }
+    }
+}
+
+// MARK: - AppDelegate to run launch-time setup (Scene has no onAppear)
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        _ = AppServices.shared // touch singletons to init
+    }
+}
 
 // MARK: - App
 
 @main
 struct ShotBarApp: App {
-    @StateObject private var prefs = Preferences()
-    @StateObject private var hotkeys = HotkeyManager()
-    @StateObject private var shots = ScreenshotManager()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    private let S = AppServices.shared
 
     var body: some Scene {
+        // Menubar UI
         MenuBarExtra("ShotBar", systemImage: "camera.viewfinder") {
             VStack(alignment: .leading, spacing: 6) {
-                Button("Capture Selection   ⇧⌘4-like") { shots.captureSelection() }
-                Button("Capture Active Window") { shots.captureActiveWindow() }
-                Button("Capture Full Screen(s)") { shots.captureFullScreens() }
+                Button("Capture Selection → Clipboard") { S.shots.captureSelection() }
+                Button("Capture Active Window → File") { S.shots.captureActiveWindow() }
+                Button("Capture Full Screen(s) → File") { S.shots.captureFullScreens() }
                 Divider()
-                Button("Reveal Save Folder") { shots.revealSaveLocationInFinder() }
+                Button("Reveal Save Folder") { S.shots.revealSaveLocationInFinder() }
                 Divider()
-                Button("Preferences…") {
-                    NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+                Button("Preferences…") { 
+                    NSApp.keyWindow?.close()
+                    // Give SwiftUI a moment to process the close
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        NSApp.sendAction(Selector("showPreferencesWindow:"), to: nil, from: nil)
+                    }
                 }
                 Button("Quit") { NSApp.terminate(nil) }
             }
@@ -33,31 +77,15 @@ struct ShotBarApp: App {
         }
         .menuBarExtraStyle(.window)
 
+        // Preferences window
         Settings {
-            PreferencesView()
-                .environmentObject(prefs)
-                .environmentObject(hotkeys)
-                .environmentObject(shots)
+            PreferencesView(prefs: S.prefs, shots: S.shots)
                 .frame(width: 420)
         }
-        .onChange(of: prefs.selectionHotkey) { _ in rebindHotkeys() }
-        .onChange(of: prefs.windowHotkey)    { _ in rebindHotkeys() }
-        .onChange(of: prefs.screenHotkey)    { _ in rebindHotkeys() }
-        .onAppear {
-            shots.refreshSaveDirectory()
-            rebindHotkeys()
-        }
-    }
-
-    private func rebindHotkeys() {
-        hotkeys.unregisterAll()
-        if let hk = prefs.selectionHotkey { hotkeys.register(id: .selection, hotkey: hk) { shots.captureSelection() } }
-        if let hk = prefs.windowHotkey    { hotkeys.register(id: .window,    hotkey: hk) { shots.captureActiveWindow() } }
-        if let hk = prefs.screenHotkey    { hotkeys.register(id: .screen,    hotkey: hk) { shots.captureFullScreens() } }
     }
 }
 
-// MARK: - Preferences model
+// MARK: - Preferences Model
 
 struct Hotkey: Codable, Equatable, Identifiable {
     var keyCode: UInt32
@@ -103,8 +131,11 @@ final class Preferences: ObservableObject {
     }
 
     private func save(_ hk: Hotkey?, key: String) {
-        if let hk { defaults.set(try? JSONEncoder().encode(hk), forKey: key) }
-        else { defaults.removeObject(forKey: key) }
+        if let hk, let data = try? JSONEncoder().encode(hk) {
+            defaults.set(data, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
     }
 
     private func load(key: String) -> Hotkey? {
@@ -116,20 +147,19 @@ final class Preferences: ObservableObject {
 // MARK: - Preferences UI
 
 struct PreferencesView: View {
-    @EnvironmentObject var prefs: Preferences
-    @EnvironmentObject var shots: ScreenshotManager
+    @ObservedObject var prefs: Preferences
+    @ObservedObject var shots: ScreenshotManager
 
     var body: some View {
         Form {
             Section("Save Location") {
                 HStack {
                     Text(shots.saveDirectory?.path ?? "Using system screenshot folder")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     Spacer()
                     Button("Reveal") { shots.revealSaveLocationInFinder() }
                 }
-                Text("By default, the app honors macOS’ Screenshot location (defaults domain com.apple.screencapture).")
+                Text("Honors macOS screenshot location (defaults domain com.apple.screencapture).")
                     .font(.caption2).foregroundStyle(.secondary)
             }
 
@@ -143,9 +173,9 @@ struct PreferencesView: View {
 
             Section("Permissions") {
                 Button("Check Screen Recording Permission") {
-                    _ = shots.checkOrRequestScreenRecordingPermission(promptIfNeeded: true)
+                    ScreenshotManager.promptForPermissionIfNeeded()
                 }
-                Text("If captures fail, grant Screen Recording in System Settings → Privacy & Security.")
+                Text("If captures fail, grant Screen & System Audio Recording in System Settings → Privacy & Security.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }
@@ -178,7 +208,7 @@ struct HotkeyPickerRow: View {
     }
 }
 
-// MARK: - Global hotkeys
+// MARK: - Global hotkeys (Carbon)
 
 enum HotkeyID: UInt32 { case selection = 1, window = 2, screen = 3 }
 
@@ -190,7 +220,7 @@ final class HotkeyManager: ObservableObject {
     func register(id: HotkeyID, hotkey: Hotkey, callback: @escaping () -> Void) {
         callbacks[id] = callback
         var hotKeyRef: EventHotKeyRef?
-        var hotKeyID = EventHotKeyID(signature: OSType(UInt32(bitPattern: 0x53484B31)), id: id.rawValue) // 'SHK1'
+        let hotKeyID = EventHotKeyID(signature: OSType(UInt32(bitPattern: 0x53484B31)), id: id.rawValue) // 'SHK1'
         let status = RegisterEventHotKey(hotkey.keyCode, 0, hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef)
         if status == noErr {
             hotkeyRefs[id] = hotKeyRef
@@ -234,98 +264,239 @@ final class HotkeyManager: ObservableObject {
     }
 }
 
-// MARK: - Screenshot manager
+// MARK: - Screenshot Manager (ScreenCaptureKit)
 
 final class ScreenshotManager: ObservableObject {
     @Published var saveDirectory: URL?
     private let toast = Toast()
 
-    // Save location
-    func refreshSaveDirectory() { saveDirectory = macOSScreenshotDirectory() ?? defaultDesktop() }
+    // MARK: Save location
+
+    func refreshSaveDirectory() {
+        saveDirectory = macOSScreenshotDirectory() ?? defaultDesktop()
+    }
+
     func revealSaveLocationInFinder() {
-        if let dir = saveDirectory ?? macOSScreenshotDirectory() ?? defaultDesktop() {
-            NSWorkspace.shared.activateFileViewerSelecting([dir])
-        }
+        let dir = saveDirectory ?? macOSScreenshotDirectory() ?? defaultDesktop()
+        NSWorkspace.shared.activateFileViewerSelecting([dir])
     }
 
-    // Capture: Selection
+    // MARK: Entry points
+
     func captureSelection() {
-        guard checkOrRequestScreenRecordingPermission(promptIfNeeded: true) else { return }
-        SelectionOverlay.present { [weak self] rect in
-            guard let self, let rect else { return } // cancelled
-            if let cg = CGWindowListCreateImage(rect, [.optionOnScreenOnly], kCGNullWindowID, [.bestResolution]) {
-                self.save(cgImage: cg, suffix: "Selection")
-            } else {
-                self.toast.show(text: "Selection capture failed")
+        SelectionOverlay.present { [weak self] selection, screen in
+            guard let self, let selection, let screen else { return }
+            Task {
+                do {
+                    let cg = try await self.captureDisplayRegion(selection: selection, on: screen)
+                    self.saveToClipboard(cgImage: cg)
+                } catch {
+                    DispatchQueue.main.async {
+                        self.toast.show(text: "Selection failed: \(error.localizedDescription)")
+                    }
+                }
             }
         }
     }
 
-    // Capture: Active Window
     func captureActiveWindow() {
-        guard checkOrRequestScreenRecordingPermission(promptIfNeeded: true) else { return }
-        guard let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier else {
-            toast.show(text: "No active app window")
-            return
-        }
-        guard let infoList = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements],
-            kCGNullWindowID
-        ) as? [[String: Any]] else {
-            toast.show(text: "Cannot query windows")
-            return
-        }
-        let candidates = infoList.compactMap { dict -> (id: CGWindowID, bounds: CGRect)? in
-            guard let pid = dict[kCGWindowOwnerPID as String] as? pid_t, pid == frontPID,
-                  let layer = dict[kCGWindowLayer as String] as? Int, layer == 0,
-                  let isOnscreen = dict[kCGWindowIsOnscreen as String] as? Bool, isOnscreen,
-                  let wid = dict[kCGWindowNumber as String] as? CGWindowID,
-                  let bDict = dict[kCGWindowBounds as String] as? [String: CGFloat] else { return nil }
-            return (wid, CGRect(x: bDict["X"] ?? 0, y: bDict["Y"] ?? 0, width: bDict["Width"] ?? 0, height: bDict["Height"] ?? 0))
-        }
-        guard let best = candidates.max(by: { $0.bounds.width * $0.bounds.height < $1.bounds.width * $1.bounds.height }) else {
-            toast.show(text: "No captureable window"); return
-        }
-        if let cg = CGWindowListCreateImage(.null, [.optionIncludingWindow], best.id, [.bestResolution]) {
-            save(cgImage: cg, suffix: "Window")
-        } else {
-            toast.show(text: "Window capture failed")
-        }
-    }
-
-    // Capture: Full Screens (all displays)
-    func captureFullScreens() {
-        guard checkOrRequestScreenRecordingPermission(promptIfNeeded: true) else { return }
-        let screens = NSScreen.screens
-        var saved = 0
-        for (idx, screen) in screens.enumerated() {
-            guard let dispID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value else { continue }
-            if let cg = CGDisplayCreateImage(CGDirectDisplayID(dispID)) {
-                let suffix = screens.count > 1 ? "Display\(idx+1)" : "Screen"
-                save(cgImage: cg, suffix: suffix)
-                saved += 1
+        Task {
+            do {
+                guard let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier else {
+                    DispatchQueue.main.async {
+                        self.toast.show(text: "No active app window")
+                    }
+                    return
+                }
+                let content = try await SCShareableContent.current
+                let windows = content.windows.filter { win in
+                    guard let app = win.owningApplication else { return false }
+                    return app.processID == frontPID && win.isOnScreen
+                }
+                guard let target = windows.max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) else {
+                    DispatchQueue.main.async {
+                        self.toast.show(text: "No captureable window")
+                    }
+                    return
+                }
+                let filter = SCContentFilter(desktopIndependentWindow: target)
+                let config = SCStreamConfiguration()
+                // Render at window size in pixels
+                let pxSize = pixelSize(forWindowFrame: target.frame)
+                config.width = pxSize.width
+                config.height = pxSize.height
+                let cg = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                self.save(cgImage: cg, suffix: "Window")
+            } catch {
+                DispatchQueue.main.async {
+                    self.toast.show(text: "Window failed: \(error.localizedDescription)")
+                }
             }
         }
-        if saved == 0 { toast.show(text: "Full screen capture failed") }
     }
 
-    // Permissions
-    @discardableResult
-    func checkOrRequestScreenRecordingPermission(promptIfNeeded: Bool) -> Bool {
-        if CGPreflightScreenCaptureAccess() { return true }
-        if promptIfNeeded { return CGRequestScreenCaptureAccess() }
-        return false
+    func captureFullScreens() {
+        Task {
+            do {
+                let content = try await SCShareableContent.current
+                let displays = content.displays
+                if displays.isEmpty { 
+                    DispatchQueue.main.async {
+                        self.toast.show(text: "No displays")
+                    }
+                    return 
+                }
+                var saved = 0
+                for (i, d) in displays.enumerated() {
+                    let filter = SCContentFilter(display: d, excludingWindows: [])
+                    let config = SCStreamConfiguration()
+                    let px = pixelSize(forDisplay: d)
+                    config.width = px.width
+                    config.height = px.height
+                    let cg = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                    let suffix = displays.count > 1 ? "Display\(i+1)" : "Screen"
+                    self.save(cgImage: cg, suffix: suffix)
+                    saved += 1
+                }
+                if saved == 0 { 
+                    DispatchQueue.main.async {
+                        self.toast.show(text: "Full screen capture failed") 
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.toast.show(text: "Full screen failed: \(error.localizedDescription)")
+                }
+            }
+        }
     }
 
-    // Save
+    // MARK: SCK helpers
+
+    private func captureDisplayRegion(selection: CGRect, on screen: NSScreen) async throws -> CGImage {
+        let content = try await SCShareableContent.current
+
+        // Map NSScreen -> SCDisplay via CGDirectDisplayID
+        guard
+            let num = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+        else {
+            throw NSError(domain: "ShotBar", code: -10, userInfo: [NSLocalizedDescriptionKey: "No display ID"])
+        }
+        let displayID = CGDirectDisplayID(num.uint32Value)
+
+        guard let scDisplay = content.displays.first(where: { $0.displayID == displayID }) else {
+            throw NSError(domain: "ShotBar", code: -10, userInfo: [NSLocalizedDescriptionKey: "Display mapping failed"])
+        }
+
+        // True pixels per point (robust on scaled/Sidecar displays)
+        let pxPerPtX = CGFloat(CGDisplayPixelsWide(displayID))  / screen.frame.width
+        let pxPerPtY = CGFloat(CGDisplayPixelsHigh(displayID)) / screen.frame.height
+
+        // selection is in GLOBAL points → make it screen-local points
+        var local = selection
+        local.origin.x -= screen.frame.minX
+        local.origin.y -= screen.frame.minY
+
+        // Convert to display-local PIXELS (origin = TOP-LEFT)
+        let pixelX = Int((local.origin.x * pxPerPtX).rounded(.towardZero))
+        let pixelW = Int((local.size.width * pxPerPtX).rounded(.towardZero))
+        let pixelH = Int((local.size.height * pxPerPtY).rounded(.towardZero))
+
+        // Y: distance from top to TOP edge of the selection
+        let pixelYFromTop = Int(((screen.frame.height - (local.origin.y + local.size.height)) * pxPerPtY)
+                                    .rounded(.towardZero))
+
+        guard pixelW >= 4, pixelH >= 4 else {
+            throw NSError(domain: "ShotBar", code: -11, userInfo: [NSLocalizedDescriptionKey: "Selection too small"])
+        }
+
+        let filter = SCContentFilter(display: scDisplay, excludingWindows: [])
+        let cfg = SCStreamConfiguration()
+        cfg.sourceRect = CGRect(x: pixelX, y: pixelYFromTop, width: pixelW, height: pixelH)
+        cfg.width  = pixelW
+        cfg.height = pixelH
+
+        return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
+    }
+
+    static func promptForPermissionIfNeeded() {
+        // There isn't a dedicated SCK authorization API; touching SCK triggers the system prompt.
+        Task {
+            _ = try? await SCShareableContent.current
+        }
+    }
+
+    private func pixelSize(forDisplay d: SCDisplay) -> (width: Int, height: Int) {
+        // SCDisplay provides a frame in points; convert using NSScreen matching displayID.
+        if let ns = NSScreen.screens.first(where: {
+            ((($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value) == d.displayID)
+        }) {
+            let s = ns.backingScaleFactor
+            let w = Int((ns.frame.width * s).rounded(.toNearestOrEven))
+            let h = Int((ns.frame.height * s).rounded(.toNearestOrEven))
+            return (w, h)
+        }
+        // Fallback: common 1x assumption (shouldn’t happen on modern macOS)
+        let w = Int(d.frame.width)
+        let h = Int(d.frame.height)
+        return (w, h)
+    }
+
+    private func pixelSize(forWindowFrame frame: CGRect) -> (width: Int, height: Int) {
+        // Use main screen scale as a reasonable default
+        let s = NSScreen.main?.backingScaleFactor ?? 2.0
+        let w = Int((frame.width * s).rounded(.toNearestOrEven))
+        let h = Int((frame.height * s).rounded(.toNearestOrEven))
+        return (w, h)
+    }
+
+    // MARK: Saving
+
+    private func saveToClipboard(cgImage: CGImage) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        
+        // Convert CGImage to NSImage for clipboard
+        let size = NSSize(width: cgImage.width, height: cgImage.height)
+        let nsImage = NSImage(cgImage: cgImage, size: size)
+        
+        if pasteboard.writeObjects([nsImage]) {
+            DispatchQueue.main.async { [weak self] in
+                self?.toast.show(text: "Screenshot copied to clipboard")
+            }
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.toast.show(text: "Failed to copy to clipboard")
+            }
+        }
+    }
+
     private func save(cgImage: CGImage, suffix: String) {
-        let dir = (saveDirectory ?? macOSScreenshotDirectory() ?? defaultDesktop())
+        let dir = saveDirectory ?? macOSScreenshotDirectory() ?? defaultDesktop()
         let url = dir.appendingPathComponent(filename(suffix: suffix)).appendingPathExtension("png")
+        
         do {
+            // Ensure directory exists and is writable
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
+            
+            // Try to save the PNG
             try savePNG(cgImage: cgImage, to: url)
-            toast.show(text: "Saved \(url.lastPathComponent)")
+            DispatchQueue.main.async { [weak self] in
+                self?.toast.show(text: "Saved \(url.lastPathComponent)")
+            }
         } catch {
-            toast.show(text: "Save failed: \(error.localizedDescription)")
+            // Fallback to Desktop if the preferred location fails
+            let fallbackURL = defaultDesktop().appendingPathComponent(filename(suffix: suffix)).appendingPathExtension("png")
+            do {
+                try savePNG(cgImage: cgImage, to: fallbackURL)
+                DispatchQueue.main.async { [weak self] in
+                    self?.toast.show(text: "Saved to Desktop: \(fallbackURL.lastPathComponent)")
+                }
+            } catch {
+                DispatchQueue.main.async { [weak self] in
+                    self?.toast.show(text: "Save failed: \(error.localizedDescription)")
+                }
+            }
         }
     }
 
@@ -338,15 +509,14 @@ final class ScreenshotManager: ObservableObject {
     private func savePNG(cgImage: CGImage, to url: URL) throws {
         let uti = UTType.png.identifier as CFString
         guard let dest = CGImageDestinationCreateWithURL(url as CFURL, uti, 1, nil) else {
-            throw NSError(domain: "Screenshot", code: -1, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationCreateWithURL failed"])
+            throw NSError(domain: "ShotBar", code: -1, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationCreateWithURL failed"])
         }
         CGImageDestinationAddImage(dest, cgImage, nil)
         if !CGImageDestinationFinalize(dest) {
-            throw NSError(domain: "Screenshot", code: -2, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationFinalize failed"])
+            throw NSError(domain: "ShotBar", code: -2, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationFinalize failed"])
         }
     }
 
-    // Save locations
     private func defaultDesktop() -> URL {
         FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
     }
@@ -363,17 +533,17 @@ final class ScreenshotManager: ObservableObject {
     }
 }
 
-// MARK: - Selection overlay (drag rectangle)
+// MARK: - Selection overlay (drag rectangle) — returns rect + screen
 
 final class SelectionOverlay: NSWindow, NSWindowDelegate {
     private var startPoint: CGPoint = .zero
     private var currentPoint: CGPoint = .zero
     private var shapeLayer = CAShapeLayer()
-    private var onComplete: ((CGRect?) -> Void)?
+    private var onComplete: ((CGRect?, NSScreen?) -> Void)?
 
     private static var activeOverlays: [SelectionOverlay] = []
 
-    static func present(onComplete: @escaping (CGRect?) -> Void) {
+    static func present(onComplete: @escaping (CGRect?, NSScreen?) -> Void) {
         activeOverlays = NSScreen.screens.map { screen in
             let w = SelectionOverlay(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false, screen: screen)
             w.onComplete = onComplete
@@ -430,12 +600,18 @@ final class SelectionOverlay: NSWindow, NSWindowDelegate {
     }
 
     private func updateSelectionPath() {
-        let rect = normalizedRect(startPoint: startPoint, endPoint: currentPoint)
-        let path = NSBezierPath(rect: self.frame).cgPath
-        let selectionPath = NSBezierPath(rect: rect).cgPath
+        guard let contentView = self.contentView else { return }
+
+        let rectScreen = normalizedRect(startPoint: startPoint, endPoint: currentPoint)
+
+        // Convert from SCREEN → WINDOW space, then use view bounds for the outer path
+        let rectWin = self.convertFromScreen(rectScreen)
+        let outer = NSBezierPath(rect: contentView.bounds).cgPath
+        let inner = NSBezierPath(rect: rectWin).cgPath
+
         let combined = CGMutablePath()
-        combined.addPath(path)
-        combined.addPath(selectionPath)
+        combined.addPath(outer)
+        combined.addPath(inner)
         shapeLayer.path = combined
     }
 
@@ -448,9 +624,10 @@ final class SelectionOverlay: NSWindow, NSWindowDelegate {
     }
 
     private func cleanup(andCompleteWith rect: CGRect?) {
+        let s = self.screen
         SelectionOverlay.activeOverlays.forEach { $0.orderOut(nil) }
         SelectionOverlay.activeOverlays.removeAll()
-        onComplete?(rect)
+        onComplete?(rect, s)
         onComplete = nil
     }
 }
