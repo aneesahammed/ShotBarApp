@@ -223,10 +223,11 @@ struct MenuContentView: View {
                     .controlSize(.small)
                     .labelsHidden()
                     .frame(width: 160)
+                    .blueSegmentedStyle() // Apply blue style
                 }
-                .padding(.vertical, 4) // Added padding for the row
                 
                 Divider()
+                    .padding(.horizontal, 12) // Add padding to divider
                 
                 labeledRow(title: "Destination:") {
                     Picker("Destination", selection: $prefs.destination) {
@@ -237,8 +238,8 @@ struct MenuContentView: View {
                     .controlSize(.small)
                     .labelsHidden()
                     .frame(width: 240)
+                    .blueSegmentedStyle() // Apply blue style
                 }
-                .padding(.vertical, 4) // Added padding for the row
             }
 
             actionRow(symbol: "selection.pin.in.out", text: actionTitle("Capture Selection")) {
@@ -305,6 +306,7 @@ struct MenuContentView: View {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(Color(nsColor: .windowBackgroundColor))
                 )
+                .padding(.leading, 4) // Added padding to prevent clipping
             VStack(alignment: .leading, spacing: 2) {
                 Text("ShotBar").font(.title3).fontWeight(.semibold)
                 Text("Save to: \(shots.saveDirectory?.lastPathComponent ?? "Documents")/")
@@ -314,14 +316,13 @@ struct MenuContentView: View {
             Spacer()
             Image(systemName: "gearshape")
                 .foregroundStyle(.secondary)
+                .padding(.trailing, 4) // Added padding for symmetry
         }
         .padding(.bottom, 4)
     }
 
     private func roundedGroup<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack(spacing: 0) { content() }
-            .padding(.horizontal, 8) // Adjusted padding
-            .padding(.vertical, 4)   // Adjusted padding
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(Color(nsColor: .controlBackgroundColor))
@@ -331,11 +332,13 @@ struct MenuContentView: View {
     private func labeledRow<Right: View>(title: String, @ViewBuilder right: () -> Right) -> some View {
         HStack(spacing: 10) {
             Text(title)
-                .frame(width: 92, alignment: .leading) // Changed to .leading for left alignment
-                .padding(.leading, 8) // Added left padding to align with design
+                .frame(width: 92, alignment: .trailing) // Changed back to .trailing
+                .padding(.trailing, 8) // Added right padding instead of left
             right()
             Spacer()
         }
+        .padding(.horizontal, 12) // Added horizontal padding to the entire row
+        .padding(.vertical, 8) // Added vertical padding to prevent white banner
     }
 
     private func actionTitle(_ base: String) -> String {
@@ -402,6 +405,15 @@ struct BlueSegmentedPickerStyle: ViewModifier {
                 // In production, you might want to use NSViewRepresentable for more control
             }
             .accentColor(.blue)
+    }
+}
+
+// Extension to make segmented controls appear with blue selection
+extension View {
+    func blueSegmentedStyle() -> some View {
+        self
+            .accentColor(.blue)
+            .colorScheme(.light) // Force light mode for consistent blue appearance
     }
 }
 
