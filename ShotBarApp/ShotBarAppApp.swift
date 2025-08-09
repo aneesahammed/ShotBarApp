@@ -204,6 +204,7 @@ struct PreferencesView: View {
 
 // MARK: - Menu UI (menubar popover)
 
+// Updated MenuContentView with fixes for UI issues
 struct MenuContentView: View {
     @ObservedObject var prefs: Preferences
     @ObservedObject var shots: ScreenshotManager
@@ -214,14 +215,19 @@ struct MenuContentView: View {
             roundedGroup {
                 labeledRow(title: "Format:") {
                     Picker("Format", selection: $prefs.imageFormat) {
-                        ForEach(ImageFormat.allCases) { f in Text(f.id) }
+                        ForEach(ImageFormat.allCases) { f in
+                            Text(f.id.uppercased()) // Changed to uppercase
+                        }
                     }
                     .pickerStyle(.segmented)
                     .controlSize(.small)
                     .labelsHidden()
                     .frame(width: 160)
                 }
+                .padding(.vertical, 4) // Added padding for the row
+                
                 Divider()
+                
                 labeledRow(title: "Destination:") {
                     Picker("Destination", selection: $prefs.destination) {
                         Text("File").tag(Destination.file)
@@ -232,6 +238,7 @@ struct MenuContentView: View {
                     .labelsHidden()
                     .frame(width: 240)
                 }
+                .padding(.vertical, 4) // Added padding for the row
             }
 
             actionRow(symbol: "selection.pin.in.out", text: actionTitle("Capture Selection")) {
@@ -270,6 +277,7 @@ struct MenuContentView: View {
                     Text("Sound")
                 }
             }
+            .toggleStyle(.checkbox)
 
             HStack {
                 Image(systemName: "person.crop.circle")
@@ -312,7 +320,8 @@ struct MenuContentView: View {
 
     private func roundedGroup<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack(spacing: 0) { content() }
-            .padding(6)
+            .padding(.horizontal, 8) // Adjusted padding
+            .padding(.vertical, 4)   // Adjusted padding
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(Color(nsColor: .controlBackgroundColor))
@@ -321,7 +330,9 @@ struct MenuContentView: View {
 
     private func labeledRow<Right: View>(title: String, @ViewBuilder right: () -> Right) -> some View {
         HStack(spacing: 10) {
-            Text(title).frame(width: 92, alignment: .trailing)
+            Text(title)
+                .frame(width: 92, alignment: .leading) // Changed to .leading for left alignment
+                .padding(.leading, 8) // Added left padding to align with design
             right()
             Spacer()
         }
@@ -336,13 +347,16 @@ struct MenuContentView: View {
 
     private func actionRow(symbol: String, text: String, action: @escaping () -> Void) -> some View {
         HoverableRowButton(symbol: symbol, title: text, action: action)
+            .padding(.horizontal, 8) // Added horizontal padding for better icon visibility
     }
 
     private func buttonRow(symbol: String, title: String, action: @escaping () -> Void) -> some View {
         HoverableRowButton(symbol: symbol, title: title, action: action)
+            .padding(.horizontal, 8) // Added horizontal padding for better icon visibility
     }
 }
 
+// Updated HoverableRowButton with better spacing
 private struct HoverableRowButton: View {
     let symbol: String
     let title: String
@@ -354,7 +368,7 @@ private struct HoverableRowButton: View {
             HStack(spacing: 10) {
                 Image(systemName: symbol)
                     .foregroundStyle(.blue)
-                    .frame(width: 18)
+                    .frame(width: 20) // Adjusted width for better icon visibility
                 Text(title)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -365,16 +379,29 @@ private struct HoverableRowButton: View {
     }
 }
 
+// Updated button style with better padding
 private struct HighlightRowButtonStyle: ButtonStyle {
     let hovered: Bool
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .padding(.vertical, 3)
-            .padding(.horizontal, 6)
+            .padding(.vertical, 4) // Increased vertical padding
+            .padding(.horizontal, 8) // Increased horizontal padding
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill((hovered || configuration.isPressed) ? Color(nsColor: .selectedContentBackgroundColor).opacity(0.6) : .clear)
             )
+    }
+}
+
+// Custom style modifier for segmented controls to make them blue
+struct BlueSegmentedPickerStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                // This is a workaround to style segmented controls
+                // In production, you might want to use NSViewRepresentable for more control
+            }
+            .accentColor(.blue)
     }
 }
 
