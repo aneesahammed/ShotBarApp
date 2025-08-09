@@ -370,35 +370,7 @@ struct MenuContentView: View {
                 shots.revealSaveLocationInFinder()
             }
             
-            // Preferences and Quit row
-            HStack {
-                Button(action: {
-                    NSApp.keyWindow?.close()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        NSApp.sendAction(Selector("showPreferencesWindow:"), to: nil, from: nil)
-                    }
-                }) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "gearshape")
-                            .font(.system(size: 16))
-                            .foregroundStyle(.blue)
-                            .frame(width: 20)
-                        Text("Preferences…")
-                            .foregroundStyle(.primary)
-                    }
-                }
-                .buttonStyle(.plain)
-                
-                Spacer()
-                
-                Button("Quit") {
-                    NSApp.terminate(nil)
-                }
-                .foregroundStyle(.secondary)
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 6)
+            
             
             // Sound toggle
             HStack {
@@ -417,24 +389,11 @@ struct MenuContentView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 6)
             
-            // Bottom section with user icon and hint
-            HStack {
-                Image(systemName: "person.crop.circle")
-                    .font(.system(size: 16))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 20)
-                
-                Text("Quit")
-                    .foregroundStyle(.secondary)
-                
-                Spacer()
-                
-                Text("Hold ⌃ to copy to clipboard")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+            // Bottom info row removed (no special Control-hold clipboard behavior implemented)
+            // Quit row (Preferences removed)
+            menuItem(icon: "power", title: "Quit", shortcut: nil) {
+                NSApp.terminate(nil)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 6)
         }
         .padding(.vertical, 8)
         .background(Color(nsColor: .windowBackgroundColor))
