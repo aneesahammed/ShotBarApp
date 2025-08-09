@@ -12,24 +12,24 @@ import UniformTypeIdentifiers
 
 final class AppServices {
     static let shared = AppServices()
-
+    
     let prefs = Preferences()
     let hotkeys = HotkeyManager()
     let shots = ScreenshotManager()
-
+    
     private var cs = Set<AnyCancellable>()
-
+    
     private init() {
         // Rebind hotkeys whenever prefs change.
         prefs.$selectionHotkey.merge(with: prefs.$windowHotkey, prefs.$screenHotkey)
             .sink { [weak self] _ in self?.rebindHotkeys() }
             .store(in: &cs)
-
+        
         // Initial setup
         shots.refreshSaveDirectory()
         rebindHotkeys()
     }
-
+    
     func rebindHotkeys() {
         hotkeys.unregisterAll()
         if let hk = prefs.selectionHotkey { hotkeys.register(id: .selection, hotkey: hk) { [weak self] in self?.shots.captureSelection() } }
@@ -52,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct ShotBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     private let S = AppServices.shared
-
+    
     var body: some Scene {
         // Menubar UI
         MenuBarExtra("ShotBar", systemImage: "camera.viewfinder") {
@@ -61,7 +61,7 @@ struct ShotBarApp: App {
                 .padding(.vertical, 6)
         }
         .menuBarExtraStyle(.window)
-
+        
         // Preferences window
         Settings {
             PreferencesView(prefs: S.prefs, shots: S.shots)
@@ -75,7 +75,7 @@ struct ShotBarApp: App {
 struct Hotkey: Codable, Equatable, Identifiable {
     var keyCode: UInt32
     var id: String { "kc-\(keyCode)" }
-
+    
     static let allFKeys: [Hotkey] = [
         Hotkey(keyCode: UInt32(kVK_F1)),  Hotkey(keyCode: UInt32(kVK_F2)),
         Hotkey(keyCode: UInt32(kVK_F3)),  Hotkey(keyCode: UInt32(kVK_F4)),
@@ -84,7 +84,7 @@ struct Hotkey: Codable, Equatable, Identifiable {
         Hotkey(keyCode: UInt32(kVK_F9)),  Hotkey(keyCode: UInt32(kVK_F10)),
         Hotkey(keyCode: UInt32(kVK_F11)), Hotkey(keyCode: UInt32(kVK_F12)),
     ]
-
+    
     var displayName: String {
         switch Int(keyCode) {
         case kVK_F1: return "F1";  case kVK_F2: return "F2";  case kVK_F3: return "F3"
@@ -103,9 +103,9 @@ final class Preferences: ObservableObject {
     @Published var imageFormat: ImageFormat = .png { didSet { save() } }
     @Published var destination: Destination = .file { didSet { save() } }
     @Published var soundEnabled: Bool = true { didSet { save() } }
-
+    
     private let defaults = UserDefaults.standard
-
+    
     init() {
         selectionHotkey = load(key: "selectionHotkey") ?? Hotkey(keyCode: UInt32(kVK_F1))
         windowHotkey    = load(key: "windowHotkey")    ?? Hotkey(keyCode: UInt32(kVK_F2))
@@ -114,7 +114,7 @@ final class Preferences: ObservableObject {
         if let raw: String = defaults.string(forKey: "destination"), let d = Destination(rawValue: raw) { destination = d }
         if defaults.object(forKey: "soundEnabled") != nil { soundEnabled = defaults.bool(forKey: "soundEnabled") }
     }
-
+    
     private func save() {
         save(selectionHotkey, key: "selectionHotkey")
         save(windowHotkey,    key: "windowHotkey")
@@ -123,7 +123,7 @@ final class Preferences: ObservableObject {
         defaults.set(destination.rawValue, forKey: "destination")
         defaults.set(soundEnabled, forKey: "soundEnabled")
     }
-
+    
     private func save(_ hk: Hotkey?, key: String) {
         if let hk, let data = try? JSONEncoder().encode(hk) {
             defaults.set(data, forKey: key)
@@ -131,7 +131,7 @@ final class Preferences: ObservableObject {
             defaults.removeObject(forKey: key)
         }
     }
-
+    
     private func load(key: String) -> Hotkey? {
         guard let data = defaults.data(forKey: key) else { return nil }
         return try? JSONDecoder().decode(Hotkey.self, from: data)
@@ -146,7 +146,7 @@ enum Destination: String, Codable, CaseIterable, Identifiable { case file, clipb
 struct PreferencesView: View {
     @ObservedObject var prefs: Preferences
     @ObservedObject var shots: ScreenshotManager
-
+    
     var body: some View {
         Form {
             Section("Default Behavior") {
@@ -181,7 +181,7 @@ struct PreferencesView: View {
                 Text("Honors macOS screenshot location (defaults domain com.apple.screencapture).")
                     .font(.caption2).foregroundStyle(.secondary)
             }
-
+            
             Section("Hotkeys (global)") {
                 HotkeyPickerRow(title: "Selection", selection: $prefs.selectionHotkey)
                 HotkeyPickerRow(title: "Active Window", selection: $prefs.windowHotkey)
@@ -189,7 +189,7 @@ struct PreferencesView: View {
                 Text("Tip: Some keyboards require holding Fn for F-keys unless you enable “Use F1, F2, etc. as standard function keys”.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
-
+            
             Section("Permissions") {
                 Button("Check Screen Recording Permission") {
                     ScreenshotManager.promptForPermissionIfNeeded()
@@ -207,42 +207,45 @@ struct PreferencesView: View {
 struct MenuContentView: View {
     @ObservedObject var prefs: Preferences
     @ObservedObject var shots: ScreenshotManager
-
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header section - dark gray background
+            // Header section
             headerSection
             
-            // Format/Destination section - light background
+            // Format/Destination section
             formatSection
             
-            // Main menu section - medium gray background
+            // Main menu section
             menuSection
         }
-        .frame(minWidth: 360)
+        .frame(minWidth: 380)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
     }
-
-    // Header section with dark background
+    
+    // Header section with light theme
     private var headerSection: some View {
         HStack(alignment: .center, spacing: 12) {
-            // App icon with proper sizing and background
-            Image(systemName: "camera.viewfinder")
-                .font(.title2)
-                .foregroundStyle(.white)
-                .frame(width: 28, height: 28)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(.blue)
-                )
+            // App icon with camera and blue circle background
+            ZStack {
+                Circle()
+                    .fill(.blue)
+                    .frame(width: 32, height: 32)
+                Image(systemName: "camera.viewfinder")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.white)
+            }
             
             VStack(alignment: .leading, spacing: 1) {
                 Text("ShotBar")
-                    .font(.title3)
+                    .font(.title2)
                     .fontWeight(.semibold)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                 Text("Save to: \(shots.saveDirectory?.lastPathComponent ?? "Documents")/")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
             
             Spacer()
@@ -250,23 +253,25 @@ struct MenuContentView: View {
             // Settings gear icon
             Image(systemName: "gearshape")
                 .font(.title2)
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color(red: 0.3, green: 0.3, blue: 0.3)) // Dark gray background
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(Color(nsColor: .controlBackgroundColor))
     }
-
-    // Format and Destination section with light background
+    
+    // Format and Destination section matching screenshot
     private var formatSection: some View {
         VStack(spacing: 12) {
             // Format row
             HStack {
                 Text("Format:")
-                    .fontWeight(.medium)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .frame(width: 100, alignment: .leading)
                 
-                HStack(spacing: 4) {
+                // Segmented control style buttons
+                HStack(spacing: 2) {
                     ForEach(ImageFormat.allCases, id: \.rawValue) { format in
                         Button(action: { prefs.imageFormat = format }) {
                             Text(format.id)
@@ -278,24 +283,27 @@ struct MenuContentView: View {
                                         .fill(prefs.imageFormat == format ? .blue : Color(nsColor: .controlBackgroundColor))
                                 )
                         }
+                        
                         .buttonStyle(.plain)
                     }
                 }
                 
                 Spacer()
                 
-                // Keyboard shortcut placeholder
+                // Keyboard shortcut
                 Text("⌃⇧⌘4")
-                    .font(.caption)
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }
             
             // Destination row
             HStack {
                 Text("Destination:")
-                    .fontWeight(.medium)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .frame(width: 100, alignment: .leading)
                 
+                // Combined segmented button
                 HStack(spacing: 4) {
                     ForEach(Destination.allCases, id: \.rawValue) { dest in
                         Button(action: { prefs.destination = dest }) {
@@ -314,38 +322,39 @@ struct MenuContentView: View {
                 
                 Spacer()
                 
-                // Keyboard shortcut placeholder
+                // Keyboard shortcut
                 Text("⌃⇧⌘3")
-                    .font(.caption)
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 20)
         .padding(.vertical, 16)
-        .background(Color(nsColor: .windowBackgroundColor)) // Light background
+        .background(Color(nsColor: .windowBackgroundColor))
     }
-
-    // Main menu section with medium gray background
+    
+    // Main menu section with light theme
     private var menuSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Main action items
-            menuItem(icon: "selection.pin.in.out", 
-                    title: actionTitle("Capture Selection"), 
-                    shortcut: "⌃⇧⌘4") {
+            menuItem(icon: "selection.pin.in.out",
+                     title: actionTitle("Capture Selection"),
+                     shortcut: "⌃⇧⌘4") {
                 shots.captureSelection()
             }
             
-            menuItem(icon: "macwindow.on.rectangle", 
-                    title: actionTitle("Capture Active Window"), 
-                    shortcut: "⌃⇧⌘4") {
+            menuItem(icon: "macwindow.on.rectangle",
+                     title: actionTitle("Capture Active Window"),
+                     shortcut: "⌃⇧⌘4") {
                 shots.captureActiveWindow()
             }
             
-            menuItem(icon: "display", 
-                    title: actionTitle("Capture Full Screen(s)"), 
-                    shortcut: "⌃3") {
+            menuItem(icon: "display",
+                     title: actionTitle("Capture Full Screen(s)"),
+                     shortcut: "⌃3") {
                 shots.captureFullScreens()
             }
+            
             
             // Divider
             Rectangle()
@@ -355,9 +364,9 @@ struct MenuContentView: View {
                 .padding(.vertical, 4)
             
             // Reveal folder item
-            menuItem(icon: "folder", 
-                    title: "Reveal Save Folder", 
-                    shortcut: nil) {
+            menuItem(icon: "folder",
+                     title: "Reveal Save Folder",
+                     shortcut: nil) {
                 shots.revealSaveLocationInFinder()
             }
             
@@ -369,84 +378,86 @@ struct MenuContentView: View {
                         NSApp.sendAction(Selector("showPreferencesWindow:"), to: nil, from: nil)
                     }
                 }) {
-                    HStack(spacing: 10) {
+                    HStack(spacing: 12) {
                         Image(systemName: "gearshape")
                             .font(.system(size: 16))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.blue)
                             .frame(width: 20)
                         Text("Preferences…")
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                     }
                 }
                 .buttonStyle(.plain)
                 
                 Spacer()
                 
-                Button("Quit") { 
-                    NSApp.terminate(nil) 
+                Button("Quit") {
+                    NSApp.terminate(nil)
                 }
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(.secondary)
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 6)
             
             // Sound toggle
             HStack {
                 Toggle(isOn: $prefs.soundEnabled) {
-                    HStack(spacing: 10) {
+                    HStack(spacing: 12) {
                         Image(systemName: "speaker.wave.2.fill")
                             .font(.system(size: 16))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.blue)
                             .frame(width: 20)
                         Text("Sound")
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                     }
                 }
                 .toggleStyle(.checkbox)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 6)
             
             // Bottom section with user icon and hint
             HStack {
                 Image(systemName: "person.crop.circle")
                     .font(.system(size: 16))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.secondary)
                     .frame(width: 20)
                 
                 Text("Quit")
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(.secondary)
                 
                 Spacer()
                 
                 Text("Hold ⌃ to copy to clipboard")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 6)
         }
-        .background(Color(red: 0.25, green: 0.25, blue: 0.25)) // Medium gray background
+        .padding(.vertical, 8)
+        .background(Color(nsColor: .windowBackgroundColor))
+        
     }
-
-    // Helper function for menu items
+    
+    // Helper function for menu items with light theme
     private func menuItem(icon: String, title: String, shortcut: String?, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: icon)
                     .font(.system(size: 16))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.blue)
                     .frame(width: 20)
                 
                 Text(title)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
                 if let shortcut = shortcut {
                     Text(shortcut)
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.7))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding(.horizontal, 16)
@@ -454,12 +465,6 @@ struct MenuContentView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { isHovered in
-            // Add subtle hover effect
-            if isHovered {
-                // Could add hover styling here if needed
-            }
-        }
     }
     
     private func actionTitle(_ base: String) -> String {
@@ -473,7 +478,7 @@ struct MenuContentView: View {
 struct HotkeyPickerRow: View {
     let title: String
     @Binding var selection: Hotkey?
-
+    
     var body: some View {
         HStack {
             Text(title)
@@ -503,7 +508,7 @@ final class HotkeyManager: ObservableObject {
     private var eventHandler: EventHandlerRef?
     private var hotkeyRefs: [HotkeyID: EventHotKeyRef?] = [:]
     private var callbacks: [HotkeyID: () -> Void] = [:]
-
+    
     func register(id: HotkeyID, hotkey: Hotkey, callback: @escaping () -> Void) {
         callbacks[id] = callback
         var hotKeyRef: EventHotKeyRef?
@@ -516,7 +521,7 @@ final class HotkeyManager: ObservableObject {
             print("RegisterEventHotKey failed (\(status)) for \(id)")
         }
     }
-
+    
     func unregisterAll() {
         for (_, ref) in hotkeyRefs { if let ref { UnregisterEventHotKey(ref) } }
         hotkeyRefs.removeAll()
@@ -526,9 +531,9 @@ final class HotkeyManager: ObservableObject {
             eventHandler = nil
         }
     }
-
+    
     deinit { unregisterAll() }
-
+    
     private func installHandlerIfNeeded() {
         guard eventHandler == nil else { return }
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
@@ -557,20 +562,20 @@ final class ScreenshotManager: ObservableObject {
     @Published var saveDirectory: URL?
     private let toast = Toast()
     private var prefs: Preferences { AppServices.shared.prefs }
-
+    
     // MARK: Save location
-
+    
     func refreshSaveDirectory() {
         saveDirectory = macOSScreenshotDirectory() ?? defaultDesktop()
     }
-
+    
     func revealSaveLocationInFinder() {
         let dir = saveDirectory ?? macOSScreenshotDirectory() ?? defaultDesktop()
         NSWorkspace.shared.activateFileViewerSelecting([dir])
     }
-
+    
     // MARK: Entry points
-
+    
     func captureSelection() {
         SelectionOverlay.present { [weak self] selection, screen in
             guard let self, let selection, let screen else { return }
@@ -586,7 +591,7 @@ final class ScreenshotManager: ObservableObject {
             }
         }
     }
-
+    
     func captureActiveWindow() {
         Task {
             do {
@@ -622,17 +627,17 @@ final class ScreenshotManager: ObservableObject {
             }
         }
     }
-
+    
     func captureFullScreens() {
         Task {
             do {
                 let content = try await SCShareableContent.current
                 let displays = content.displays
-                if displays.isEmpty { 
+                if displays.isEmpty {
                     DispatchQueue.main.async {
                         self.toast.show(text: "No displays")
                     }
-                    return 
+                    return
                 }
                 var saved = 0
                 for (i, d) in displays.enumerated() {
@@ -646,9 +651,9 @@ final class ScreenshotManager: ObservableObject {
                     self.saveAccordingToPreferences(cgImage: cg, suffix: suffix)
                     saved += 1
                 }
-                if saved == 0 { 
+                if saved == 0 {
                     DispatchQueue.main.async {
-                        self.toast.show(text: "Full screen capture failed") 
+                        self.toast.show(text: "Full screen capture failed")
                     }
                 }
             } catch {
@@ -658,12 +663,12 @@ final class ScreenshotManager: ObservableObject {
             }
         }
     }
-
+    
     // MARK: SCK helpers
-
+    
     private func captureDisplayRegion(selection: CGRect, on screen: NSScreen) async throws -> CGImage {
         let content = try await SCShareableContent.current
-
+        
         // Map NSScreen -> SCDisplay via CGDirectDisplayID
         guard
             let num = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
@@ -671,49 +676,49 @@ final class ScreenshotManager: ObservableObject {
             throw NSError(domain: "ShotBar", code: -10, userInfo: [NSLocalizedDescriptionKey: "No display ID"])
         }
         let displayID = CGDirectDisplayID(num.uint32Value)
-
+        
         guard let scDisplay = content.displays.first(where: { $0.displayID == displayID }) else {
             throw NSError(domain: "ShotBar", code: -10, userInfo: [NSLocalizedDescriptionKey: "Display mapping failed"])
         }
-
+        
         // True pixels per point (robust on scaled/Sidecar displays)
         let pxPerPtX = CGFloat(CGDisplayPixelsWide(displayID))  / screen.frame.width
         let pxPerPtY = CGFloat(CGDisplayPixelsHigh(displayID)) / screen.frame.height
-
+        
         // selection is in GLOBAL points → make it screen-local points
         var local = selection
         local.origin.x -= screen.frame.minX
         local.origin.y -= screen.frame.minY
-
+        
         // Convert to display-local PIXELS (origin = TOP-LEFT)
         let pixelX = Int((local.origin.x * pxPerPtX).rounded(.towardZero))
         let pixelW = Int((local.size.width * pxPerPtX).rounded(.towardZero))
         let pixelH = Int((local.size.height * pxPerPtY).rounded(.towardZero))
-
+        
         // Y: distance from top to TOP edge of the selection
         let pixelYFromTop = Int(((screen.frame.height - (local.origin.y + local.size.height)) * pxPerPtY)
-                                    .rounded(.towardZero))
-
+            .rounded(.towardZero))
+        
         guard pixelW >= 4, pixelH >= 4 else {
             throw NSError(domain: "ShotBar", code: -11, userInfo: [NSLocalizedDescriptionKey: "Selection too small"])
         }
-
+        
         let filter = SCContentFilter(display: scDisplay, excludingWindows: [])
         let cfg = SCStreamConfiguration()
         cfg.sourceRect = CGRect(x: pixelX, y: pixelYFromTop, width: pixelW, height: pixelH)
         cfg.width  = pixelW
         cfg.height = pixelH
-
+        
         return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
     }
-
+    
     static func promptForPermissionIfNeeded() {
         // There isn't a dedicated SCK authorization API; touching SCK triggers the system prompt.
         Task {
             _ = try? await SCShareableContent.current
         }
     }
-
+    
     private func pixelSize(forDisplay d: SCDisplay) -> (width: Int, height: Int) {
         // SCDisplay provides a frame in points; convert using NSScreen matching displayID.
         if let ns = NSScreen.screens.first(where: {
@@ -729,7 +734,7 @@ final class ScreenshotManager: ObservableObject {
         let h = Int(d.frame.height)
         return (w, h)
     }
-
+    
     private func pixelSize(forWindowFrame frame: CGRect) -> (width: Int, height: Int) {
         // Use main screen scale as a reasonable default
         let s = NSScreen.main?.backingScaleFactor ?? 2.0
@@ -737,9 +742,9 @@ final class ScreenshotManager: ObservableObject {
         let h = Int((frame.height * s).rounded(.toNearestOrEven))
         return (w, h)
     }
-
+    
     // MARK: Saving
-
+    
     private func saveAccordingToPreferences(cgImage: CGImage, suffix: String) {
         switch prefs.destination {
         case .clipboard:
@@ -748,7 +753,7 @@ final class ScreenshotManager: ObservableObject {
             self.save(cgImage: cgImage, suffix: suffix)
         }
     }
-
+    
     private func saveToClipboard(cgImage: CGImage) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -768,7 +773,7 @@ final class ScreenshotManager: ObservableObject {
             }
         }
     }
-
+    
     private func save(cgImage: CGImage, suffix: String) {
         let dir = saveDirectory ?? macOSScreenshotDirectory() ?? defaultDesktop()
         let ext = (prefs.imageFormat == .png) ? "png" : "jpg"
@@ -807,13 +812,13 @@ final class ScreenshotManager: ObservableObject {
             }
         }
     }
-
+    
     private func filename(suffix: String) -> String {
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
         return "Screenshot \(df.string(from: Date())) \(suffix)"
     }
-
+    
     private func savePNG(cgImage: CGImage, to url: URL) throws {
         let uti = UTType.png.identifier as CFString
         guard let dest = CGImageDestinationCreateWithURL(url as CFURL, uti, 1, nil) else {
@@ -824,7 +829,7 @@ final class ScreenshotManager: ObservableObject {
             throw NSError(domain: "ShotBar", code: -2, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationFinalize failed"])
         }
     }
-
+    
     private func saveJPG(cgImage: CGImage, to url: URL, quality: Double) throws {
         let uti = UTType.jpeg.identifier as CFString
         guard let dest = CGImageDestinationCreateWithURL(url as CFURL, uti, 1, nil) else {
@@ -836,12 +841,12 @@ final class ScreenshotManager: ObservableObject {
             throw NSError(domain: "ShotBar", code: -2, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationFinalize failed"])
         }
     }
-
+    
     private func playShutterSoundIfEnabled() {
         guard AppServices.shared.prefs.soundEnabled else { return }
         NSSound(named: NSSound.Name("Tink"))?.play()
     }
-
+    
     private func defaultDesktop() -> URL {
         FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
     }
@@ -865,9 +870,9 @@ final class SelectionOverlay: NSWindow, NSWindowDelegate {
     private var currentPoint: CGPoint = .zero
     private var shapeLayer = CAShapeLayer()
     private var onComplete: ((CGRect?, NSScreen?) -> Void)?
-
+    
     private static var activeOverlays: [SelectionOverlay] = []
-
+    
     static func present(onComplete: @escaping (CGRect?, NSScreen?) -> Void) {
         activeOverlays = NSScreen.screens.map { screen in
             let w = SelectionOverlay(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false, screen: screen)
@@ -877,7 +882,7 @@ final class SelectionOverlay: NSWindow, NSWindowDelegate {
         activeOverlays.forEach { $0.makeKeyAndOrderFront(nil) }
         NSCursor.crosshair.set()
     }
-
+    
     convenience init(contentRect: NSRect, styleMask style: NSWindow.StyleMask, backing bufferingType: NSWindow.BackingStoreType, defer flag: Bool, screen: NSScreen) {
         self.init(contentRect: contentRect, styleMask: style, backing: bufferingType, defer: flag)
         isOpaque = false
@@ -887,59 +892,59 @@ final class SelectionOverlay: NSWindow, NSWindowDelegate {
         level = .screenSaver
         collectionBehavior = [.transient, .ignoresCycle]
         delegate = self
-
+        
         let v = NSView(frame: contentRect)
         v.wantsLayer = true
         v.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.15).cgColor
-
+        
         shapeLayer.fillRule = .evenOdd
         shapeLayer.fillColor = NSColor.black.withAlphaComponent(0.15).cgColor
         shapeLayer.strokeColor = NSColor.white.withAlphaComponent(0.9).cgColor
         shapeLayer.lineWidth = 2
         v.layer?.addSublayer(shapeLayer)
-
+        
         contentView = v
     }
-
+    
     override func mouseDown(with event: NSEvent) {
         startPoint = NSEvent.mouseLocation
         currentPoint = startPoint
         updateSelectionPath()
     }
-
+    
     override func mouseDragged(with event: NSEvent) {
         currentPoint = NSEvent.mouseLocation
         updateSelectionPath()
     }
-
+    
     override func mouseUp(with event: NSEvent) {
         currentPoint = NSEvent.mouseLocation
         let rect = normalizedRect(startPoint: startPoint, endPoint: currentPoint)
         cleanup(andCompleteWith: rect.width > 4 && rect.height > 4 ? rect : nil)
     }
-
+    
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { // Esc
             cleanup(andCompleteWith: nil)
         }
     }
-
+    
     private func updateSelectionPath() {
         guard let contentView = self.contentView else { return }
-
+        
         let rectScreen = normalizedRect(startPoint: startPoint, endPoint: currentPoint)
-
+        
         // Convert from SCREEN → WINDOW space, then use view bounds for the outer path
         let rectWin = self.convertFromScreen(rectScreen)
         let outer = NSBezierPath(rect: contentView.bounds).cgPath
         let inner = NSBezierPath(rect: rectWin).cgPath
-
+        
         let combined = CGMutablePath()
         combined.addPath(outer)
         combined.addPath(inner)
         shapeLayer.path = combined
     }
-
+    
     private func normalizedRect(startPoint: CGPoint, endPoint: CGPoint) -> CGRect {
         let x = min(startPoint.x, endPoint.x)
         let y = min(startPoint.y, endPoint.y)
@@ -947,7 +952,7 @@ final class SelectionOverlay: NSWindow, NSWindowDelegate {
         let h = abs(startPoint.y - endPoint.y)
         return CGRect(x: x, y: y, width: w, height: h)
     }
-
+    
     private func cleanup(andCompleteWith rect: CGRect?) {
         let s = self.screen
         SelectionOverlay.activeOverlays.forEach { $0.orderOut(nil) }
@@ -978,13 +983,13 @@ private extension NSBezierPath {
 
 final class Toast {
     private var window: NSWindow?
-
+    
     func show(text: String, duration: TimeInterval = 1.25) {
         let label = NSTextField(labelWithString: text)
         label.textColor = .white
         label.font = .systemFont(ofSize: 12, weight: .medium)
         label.lineBreakMode = .byTruncatingMiddle
-
+        
         let padding: CGFloat = 14
         let size = label.intrinsicContentSize
         let frame = NSRect(x: 0, y: 0, width: size.width + padding*2, height: size.height + padding)
@@ -995,30 +1000,30 @@ final class Toast {
         win.hasShadow = true
         win.ignoresMouseEvents = true
         win.collectionBehavior = [.transient, .ignoresCycle]
-
+        
         let bg = NSVisualEffectView(frame: frame)
         bg.material = .hudWindow
         bg.blendingMode = .withinWindow
         bg.state = .active
         bg.wantsLayer = true
         bg.layer?.cornerRadius = 10
-
+        
         label.frame = NSRect(x: padding, y: (frame.height - size.height)/2 - 1, width: size.width, height: size.height)
         bg.addSubview(label)
         win.contentView = bg
-
+        
         if let screen = NSScreen.main {
             let origin = CGPoint(x: screen.frame.maxX - frame.width - 20, y: screen.frame.maxY - frame.height - 36)
             win.setFrameOrigin(origin)
         }
-
+        
         win.alphaValue = 0
         win.makeKeyAndOrderFront(nil)
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.12
             win.animator().alphaValue = 1
         }
-
+        
         self.window = win
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
             guard let self, let win = self.window else { return }
