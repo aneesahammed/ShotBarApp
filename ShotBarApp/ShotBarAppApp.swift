@@ -860,6 +860,8 @@ final class SelectionOverlay: NSWindow, NSWindowDelegate {
         shapeLayer.fillColor = NSColor.black.withAlphaComponent(0.15).cgColor
         shapeLayer.strokeColor = NSColor.white.withAlphaComponent(0.9).cgColor
         shapeLayer.lineWidth = 2
+        // Make the selection rectangle use dotted lines
+        shapeLayer.lineDashPattern = [6, 4] // 6 points dash, 4 points gap
         v.layer?.addSublayer(shapeLayer)
         
         contentView = v
