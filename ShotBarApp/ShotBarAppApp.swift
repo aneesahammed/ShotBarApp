@@ -204,216 +204,269 @@ struct PreferencesView: View {
 
 // MARK: - Menu UI (menubar popover)
 
-// Updated MenuContentView with fixes for UI issues
 struct MenuContentView: View {
     @ObservedObject var prefs: Preferences
     @ObservedObject var shots: ScreenshotManager
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            header
-            roundedGroup {
-                labeledRow(title: "Format:") {
-                    Picker("Format", selection: $prefs.imageFormat) {
-                        ForEach(ImageFormat.allCases) { f in
-                            Text(f.id.uppercased()) // Changed to uppercase
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .controlSize(.small)
-                    .labelsHidden()
-                    .frame(width: 160)
-                    .blueSegmentedStyle() // Apply blue style
-                }
-                
-                Divider()
-                    .padding(.horizontal, 12) // Add padding to divider
-                
-                labeledRow(title: "Destination:") {
-                    Picker("Destination", selection: $prefs.destination) {
-                        Text("File").tag(Destination.file)
-                        Text("Clipboard").tag(Destination.clipboard)
-                    }
-                    .pickerStyle(.segmented)
-                    .controlSize(.small)
-                    .labelsHidden()
-                    .frame(width: 240)
-                    .blueSegmentedStyle() // Apply blue style
-                }
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            // Header section - dark gray background
+            headerSection
+            
+            // Format/Destination section - light background
+            formatSection
+            
+            // Main menu section - medium gray background
+            menuSection
+        }
+        .frame(minWidth: 360)
+    }
 
-            actionRow(symbol: "selection.pin.in.out", text: actionTitle("Capture Selection")) {
+    // Header section with dark background
+    private var headerSection: some View {
+        HStack(alignment: .center, spacing: 12) {
+            // App icon with proper sizing and background
+            Image(systemName: "camera.viewfinder")
+                .font(.title2)
+                .foregroundStyle(.white)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(.blue)
+                )
+            
+            VStack(alignment: .leading, spacing: 1) {
+                Text("ShotBar")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
+                Text("Save to: \(shots.saveDirectory?.lastPathComponent ?? "Documents")/")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+            
+            Spacer()
+            
+            // Settings gear icon
+            Image(systemName: "gearshape")
+                .font(.title2)
+                .foregroundStyle(.white.opacity(0.7))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color(red: 0.3, green: 0.3, blue: 0.3)) // Dark gray background
+    }
+
+    // Format and Destination section with light background
+    private var formatSection: some View {
+        VStack(spacing: 12) {
+            // Format row
+            HStack {
+                Text("Format:")
+                    .fontWeight(.medium)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                HStack(spacing: 4) {
+                    ForEach(ImageFormat.allCases, id: \.rawValue) { format in
+                        Button(action: { prefs.imageFormat = format }) {
+                            Text(format.id)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(prefs.imageFormat == format ? .white : .primary)
+                                .frame(width: 50, height: 24)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(prefs.imageFormat == format ? .blue : Color(nsColor: .controlBackgroundColor))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                
+                Spacer()
+                
+                // Keyboard shortcut placeholder
+                Text("⌃⇧⌘4")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            
+            // Destination row
+            HStack {
+                Text("Destination:")
+                    .fontWeight(.medium)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                HStack(spacing: 4) {
+                    ForEach(Destination.allCases, id: \.rawValue) { dest in
+                        Button(action: { prefs.destination = dest }) {
+                            Text(dest.id.capitalized)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(prefs.destination == dest ? .white : .primary)
+                                .frame(width: 80, height: 24)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(prefs.destination == dest ? .blue : Color(nsColor: .controlBackgroundColor))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                
+                Spacer()
+                
+                // Keyboard shortcut placeholder
+                Text("⌃⇧⌘3")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 16)
+        .background(Color(nsColor: .windowBackgroundColor)) // Light background
+    }
+
+    // Main menu section with medium gray background
+    private var menuSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Main action items
+            menuItem(icon: "selection.pin.in.out", 
+                    title: actionTitle("Capture Selection"), 
+                    shortcut: "⌃⇧⌘4") {
                 shots.captureSelection()
             }
-            actionRow(symbol: "macwindow.on.rectangle", text: actionTitle("Capture Active Window")) {
+            
+            menuItem(icon: "macwindow.on.rectangle", 
+                    title: actionTitle("Capture Active Window"), 
+                    shortcut: "⌃⇧⌘4") {
                 shots.captureActiveWindow()
             }
-            actionRow(symbol: "display", text: actionTitle("Capture Full Screen(s)")) {
+            
+            menuItem(icon: "display", 
+                    title: actionTitle("Capture Full Screen(s)"), 
+                    shortcut: "⌃3") {
                 shots.captureFullScreens()
             }
-
-            Divider()
-
-            buttonRow(symbol: "folder", title: "Reveal Save Folder") {
+            
+            // Divider
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor))
+                .frame(height: 1)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+            
+            // Reveal folder item
+            menuItem(icon: "folder", 
+                    title: "Reveal Save Folder", 
+                    shortcut: nil) {
                 shots.revealSaveLocationInFinder()
             }
-
+            
+            // Preferences and Quit row
             HStack {
-                buttonRow(symbol: "gearshape", title: "Preferences…") {
+                Button(action: {
                     NSApp.keyWindow?.close()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         NSApp.sendAction(Selector("showPreferencesWindow:"), to: nil, from: nil)
                     }
+                }) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 16))
+                            .foregroundStyle(.white)
+                            .frame(width: 20)
+                        Text("Preferences…")
+                            .foregroundStyle(.white)
+                    }
                 }
+                .buttonStyle(.plain)
+                
                 Spacer()
-                Text("Quit")
-                    .foregroundStyle(.secondary)
-                    .onTapGesture { NSApp.terminate(nil) }
-            }
-
-            Toggle(isOn: $prefs.soundEnabled) {
-                HStack(spacing: 8) {
-                    Image(systemName: "speaker.wave.2.fill")
-                        .foregroundStyle(.blue)
-                    Text("Sound")
+                
+                Button("Quit") { 
+                    NSApp.terminate(nil) 
                 }
+                .foregroundStyle(.white.opacity(0.7))
+                .buttonStyle(.plain)
             }
-            .toggleStyle(.checkbox)
-
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            
+            // Sound toggle
+            HStack {
+                Toggle(isOn: $prefs.soundEnabled) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "speaker.wave.2.fill")
+                            .font(.system(size: 16))
+                            .foregroundStyle(.white)
+                            .frame(width: 20)
+                        Text("Sound")
+                            .foregroundStyle(.white)
+                    }
+                }
+                .toggleStyle(.checkbox)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            
+            // Bottom section with user icon and hint
             HStack {
                 Image(systemName: "person.crop.circle")
-                    .foregroundStyle(.secondary)
-                Button("Quit") { NSApp.terminate(nil) }
-                    .buttonStyle(.plain)
+                    .font(.system(size: 16))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .frame(width: 20)
+                
+                Text("Quit")
+                    .foregroundStyle(.white.opacity(0.7))
+                
                 Spacer()
-                Text("Hold ⇧⌘ to copy to clipboard")
+                
+                Text("Hold ⌃ to copy to clipboard")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.7))
             }
-            .padding(.top, 2)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .background(Color(red: 0.25, green: 0.25, blue: 0.25)) // Medium gray background
     }
 
-    private var header: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Image(systemName: "camera.viewfinder")
-                .imageScale(.large)
-                .frame(width: 32, height: 32)
-                .foregroundStyle(.blue)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color(nsColor: .windowBackgroundColor))
-                )
-                .padding(.leading, 4) // Added padding to prevent clipping
-            VStack(alignment: .leading, spacing: 2) {
-                Text("ShotBar").font(.title3).fontWeight(.semibold)
-                Text("Save to: \(shots.saveDirectory?.lastPathComponent ?? "Documents")/")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+    // Helper function for menu items
+    private func menuItem(icon: String, title: String, shortcut: String?, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 16))
+                    .foregroundStyle(.white)
+                    .frame(width: 20)
+                
+                Text(title)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                if let shortcut = shortcut {
+                    Text(shortcut)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
             }
-            Spacer()
-            Image(systemName: "gearshape")
-                .foregroundStyle(.secondary)
-                .padding(.trailing, 4) // Added padding for symmetry
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
         }
-        .padding(.bottom, 4)
-    }
-
-    private func roundedGroup<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(spacing: 0) { content() }
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-            )
-    }
-
-    private func labeledRow<Right: View>(title: String, @ViewBuilder right: () -> Right) -> some View {
-        HStack(spacing: 10) {
-            Text(title)
-                .frame(width: 92, alignment: .trailing) // Changed back to .trailing
-                .padding(.trailing, 8) // Added right padding instead of left
-            right()
-            Spacer()
+        .buttonStyle(.plain)
+        .onHover { isHovered in
+            // Add subtle hover effect
+            if isHovered {
+                // Could add hover styling here if needed
+            }
         }
-        .padding(.horizontal, 12) // Added horizontal padding to the entire row
-        .padding(.vertical, 8) // Added vertical padding to prevent white banner
     }
-
+    
     private func actionTitle(_ base: String) -> String {
         switch prefs.destination {
         case .file: return "\(base) → File"
         case .clipboard: return "\(base) → Clipboard"
         }
-    }
-
-    private func actionRow(symbol: String, text: String, action: @escaping () -> Void) -> some View {
-        HoverableRowButton(symbol: symbol, title: text, action: action)
-            .padding(.horizontal, 8) // Added horizontal padding for better icon visibility
-    }
-
-    private func buttonRow(symbol: String, title: String, action: @escaping () -> Void) -> some View {
-        HoverableRowButton(symbol: symbol, title: title, action: action)
-            .padding(.horizontal, 8) // Added horizontal padding for better icon visibility
-    }
-}
-
-// Updated HoverableRowButton with better spacing
-private struct HoverableRowButton: View {
-    let symbol: String
-    let title: String
-    let action: () -> Void
-    @State private var hovered = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: symbol)
-                    .foregroundStyle(.blue)
-                    .frame(width: 20) // Adjusted width for better icon visibility
-                Text(title)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .buttonStyle(HighlightRowButtonStyle(hovered: hovered))
-        .contentShape(Rectangle())
-        .onHover { hovered = $0 }
-    }
-}
-
-// Updated button style with better padding
-private struct HighlightRowButtonStyle: ButtonStyle {
-    let hovered: Bool
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(.vertical, 4) // Increased vertical padding
-            .padding(.horizontal, 8) // Increased horizontal padding
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill((hovered || configuration.isPressed) ? Color(nsColor: .selectedContentBackgroundColor).opacity(0.6) : .clear)
-            )
-    }
-}
-
-// Custom style modifier for segmented controls to make them blue
-struct BlueSegmentedPickerStyle: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .onAppear {
-                // This is a workaround to style segmented controls
-                // In production, you might want to use NSViewRepresentable for more control
-            }
-            .accentColor(.blue)
-    }
-}
-
-// Extension to make segmented controls appear with blue selection
-extension View {
-    func blueSegmentedStyle() -> some View {
-        self
-            .accentColor(.blue)
-            .colorScheme(.light) // Force light mode for consistent blue appearance
     }
 }
 
