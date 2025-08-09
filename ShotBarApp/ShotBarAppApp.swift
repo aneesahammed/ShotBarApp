@@ -56,24 +56,9 @@ struct ShotBarApp: App {
     var body: some Scene {
         // Menubar UI
         MenuBarExtra("ShotBar", systemImage: "camera.viewfinder") {
-            VStack(alignment: .leading, spacing: 6) {
-                Button("Capture Selection → Clipboard") { S.shots.captureSelection() }
-                Button("Capture Active Window → File") { S.shots.captureActiveWindow() }
-                Button("Capture Full Screen(s) → File") { S.shots.captureFullScreens() }
-                Divider()
-                Button("Reveal Save Folder") { S.shots.revealSaveLocationInFinder() }
-                Divider()
-                Button("Preferences…") { 
-                    NSApp.keyWindow?.close()
-                    // Give SwiftUI a moment to process the close
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        NSApp.sendAction(Selector("showPreferencesWindow:"), to: nil, from: nil)
-                    }
-                }
-                Button("Quit") { NSApp.terminate(nil) }
-            }
-            .padding(.vertical, 4)
-            .frame(minWidth: 240)
+            MenuContentView(prefs: S.prefs, shots: S.shots)
+                .frame(minWidth: 360)
+                .padding(.vertical, 6)
         }
         .menuBarExtraStyle(.window)
 
@@ -115,6 +100,9 @@ final class Preferences: ObservableObject {
     @Published var selectionHotkey: Hotkey? { didSet { save() } }
     @Published var windowHotkey: Hotkey?    { didSet { save() } }
     @Published var screenHotkey: Hotkey?    { didSet { save() } }
+    @Published var imageFormat: ImageFormat = .png { didSet { save() } }
+    @Published var destination: Destination = .file { didSet { save() } }
+    @Published var soundEnabled: Bool = true { didSet { save() } }
 
     private let defaults = UserDefaults.standard
 
@@ -122,12 +110,18 @@ final class Preferences: ObservableObject {
         selectionHotkey = load(key: "selectionHotkey") ?? Hotkey(keyCode: UInt32(kVK_F1))
         windowHotkey    = load(key: "windowHotkey")    ?? Hotkey(keyCode: UInt32(kVK_F2))
         screenHotkey    = load(key: "screenHotkey")    ?? Hotkey(keyCode: UInt32(kVK_F3))
+        if let raw: String = defaults.string(forKey: "imageFormat"), let f = ImageFormat(rawValue: raw) { imageFormat = f }
+        if let raw: String = defaults.string(forKey: "destination"), let d = Destination(rawValue: raw) { destination = d }
+        if defaults.object(forKey: "soundEnabled") != nil { soundEnabled = defaults.bool(forKey: "soundEnabled") }
     }
 
     private func save() {
         save(selectionHotkey, key: "selectionHotkey")
         save(windowHotkey,    key: "windowHotkey")
         save(screenHotkey,    key: "screenHotkey")
+        defaults.set(imageFormat.rawValue, forKey: "imageFormat")
+        defaults.set(destination.rawValue, forKey: "destination")
+        defaults.set(soundEnabled, forKey: "soundEnabled")
     }
 
     private func save(_ hk: Hotkey?, key: String) {
@@ -144,6 +138,9 @@ final class Preferences: ObservableObject {
     }
 }
 
+enum ImageFormat: String, Codable, CaseIterable, Identifiable { case png, jpg; var id: String { rawValue.uppercased() } }
+enum Destination: String, Codable, CaseIterable, Identifiable { case file, clipboard; var id: String { rawValue } }
+
 // MARK: - Preferences UI
 
 struct PreferencesView: View {
@@ -152,6 +149,28 @@ struct PreferencesView: View {
 
     var body: some View {
         Form {
+            Section("Default Behavior") {
+                HStack {
+                    Text("Format")
+                    Spacer()
+                    Picker("Format", selection: $prefs.imageFormat) {
+                        ForEach(ImageFormat.allCases) { f in Text(f.id) }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 160)
+                }
+                HStack {
+                    Text("Destination")
+                    Spacer()
+                    Picker("Destination", selection: $prefs.destination) {
+                        Text("File").tag(Destination.file)
+                        Text("Clipboard").tag(Destination.clipboard)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 220)
+                }
+                Toggle("Sound", isOn: $prefs.soundEnabled)
+            }
             Section("Save Location") {
                 HStack {
                     Text(shots.saveDirectory?.path ?? "Using system screenshot folder")
@@ -180,6 +199,182 @@ struct PreferencesView: View {
             }
         }
         .padding()
+    }
+}
+
+// MARK: - Menu UI (menubar popover)
+
+struct MenuContentView: View {
+    @ObservedObject var prefs: Preferences
+    @ObservedObject var shots: ScreenshotManager
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            header
+            roundedGroup {
+                labeledRow(title: "Format:") {
+                    Picker("Format", selection: $prefs.imageFormat) {
+                        ForEach(ImageFormat.allCases) { f in Text(f.id) }
+                    }
+                    .pickerStyle(.segmented)
+                    .controlSize(.small)
+                    .labelsHidden()
+                    .frame(width: 160)
+                }
+                Divider()
+                labeledRow(title: "Destination:") {
+                    Picker("Destination", selection: $prefs.destination) {
+                        Text("File").tag(Destination.file)
+                        Text("Clipboard").tag(Destination.clipboard)
+                    }
+                    .pickerStyle(.segmented)
+                    .controlSize(.small)
+                    .labelsHidden()
+                    .frame(width: 240)
+                }
+            }
+
+            actionRow(symbol: "selection.pin.in.out", text: actionTitle("Capture Selection")) {
+                shots.captureSelection()
+            }
+            actionRow(symbol: "macwindow.on.rectangle", text: actionTitle("Capture Active Window")) {
+                shots.captureActiveWindow()
+            }
+            actionRow(symbol: "display", text: actionTitle("Capture Full Screen(s)")) {
+                shots.captureFullScreens()
+            }
+
+            Divider()
+
+            buttonRow(symbol: "folder", title: "Reveal Save Folder") {
+                shots.revealSaveLocationInFinder()
+            }
+
+            HStack {
+                buttonRow(symbol: "gearshape", title: "Preferences…") {
+                    NSApp.keyWindow?.close()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        NSApp.sendAction(Selector("showPreferencesWindow:"), to: nil, from: nil)
+                    }
+                }
+                Spacer()
+                Text("Quit")
+                    .foregroundStyle(.secondary)
+                    .onTapGesture { NSApp.terminate(nil) }
+            }
+
+            Toggle(isOn: $prefs.soundEnabled) {
+                HStack(spacing: 8) {
+                    Image(systemName: "speaker.wave.2.fill")
+                        .foregroundStyle(.blue)
+                    Text("Sound")
+                }
+            }
+
+            HStack {
+                Image(systemName: "person.crop.circle")
+                    .foregroundStyle(.secondary)
+                Button("Quit") { NSApp.terminate(nil) }
+                    .buttonStyle(.plain)
+                Spacer()
+                Text("Hold ⇧⌘ to copy to clipboard")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 2)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "camera.viewfinder")
+                .imageScale(.large)
+                .frame(width: 32, height: 32)
+                .foregroundStyle(.blue)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color(nsColor: .windowBackgroundColor))
+                )
+            VStack(alignment: .leading, spacing: 2) {
+                Text("ShotBar").font(.title3).fontWeight(.semibold)
+                Text("Save to: \(shots.saveDirectory?.lastPathComponent ?? "Documents")/")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "gearshape")
+                .foregroundStyle(.secondary)
+        }
+        .padding(.bottom, 4)
+    }
+
+    private func roundedGroup<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(spacing: 0) { content() }
+            .padding(6)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+    }
+
+    private func labeledRow<Right: View>(title: String, @ViewBuilder right: () -> Right) -> some View {
+        HStack(spacing: 10) {
+            Text(title).frame(width: 92, alignment: .trailing)
+            right()
+            Spacer()
+        }
+    }
+
+    private func actionTitle(_ base: String) -> String {
+        switch prefs.destination {
+        case .file: return "\(base) → File"
+        case .clipboard: return "\(base) → Clipboard"
+        }
+    }
+
+    private func actionRow(symbol: String, text: String, action: @escaping () -> Void) -> some View {
+        HoverableRowButton(symbol: symbol, title: text, action: action)
+    }
+
+    private func buttonRow(symbol: String, title: String, action: @escaping () -> Void) -> some View {
+        HoverableRowButton(symbol: symbol, title: title, action: action)
+    }
+}
+
+private struct HoverableRowButton: View {
+    let symbol: String
+    let title: String
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: symbol)
+                    .foregroundStyle(.blue)
+                    .frame(width: 18)
+                Text(title)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .buttonStyle(HighlightRowButtonStyle(hovered: hovered))
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
+    }
+}
+
+private struct HighlightRowButtonStyle: ButtonStyle {
+    let hovered: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.vertical, 3)
+            .padding(.horizontal, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill((hovered || configuration.isPressed) ? Color(nsColor: .selectedContentBackgroundColor).opacity(0.6) : .clear)
+            )
     }
 }
 
@@ -269,6 +464,7 @@ final class HotkeyManager: ObservableObject {
 final class ScreenshotManager: ObservableObject {
     @Published var saveDirectory: URL?
     private let toast = Toast()
+    private var prefs: Preferences { AppServices.shared.prefs }
 
     // MARK: Save location
 
@@ -289,7 +485,7 @@ final class ScreenshotManager: ObservableObject {
             Task {
                 do {
                     let cg = try await self.captureDisplayRegion(selection: selection, on: screen)
-                    self.saveToClipboard(cgImage: cg)
+                    self.saveAccordingToPreferences(cgImage: cg, suffix: "Selection")
                 } catch {
                     DispatchQueue.main.async {
                         self.toast.show(text: "Selection failed: \(error.localizedDescription)")
@@ -326,7 +522,7 @@ final class ScreenshotManager: ObservableObject {
                 config.width = pxSize.width
                 config.height = pxSize.height
                 let cg = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-                self.save(cgImage: cg, suffix: "Window")
+                self.saveAccordingToPreferences(cgImage: cg, suffix: "Window")
             } catch {
                 DispatchQueue.main.async {
                     self.toast.show(text: "Window failed: \(error.localizedDescription)")
@@ -355,7 +551,7 @@ final class ScreenshotManager: ObservableObject {
                     config.height = px.height
                     let cg = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
                     let suffix = displays.count > 1 ? "Display\(i+1)" : "Screen"
-                    self.save(cgImage: cg, suffix: suffix)
+                    self.saveAccordingToPreferences(cgImage: cg, suffix: suffix)
                     saved += 1
                 }
                 if saved == 0 { 
@@ -452,6 +648,15 @@ final class ScreenshotManager: ObservableObject {
 
     // MARK: Saving
 
+    private func saveAccordingToPreferences(cgImage: CGImage, suffix: String) {
+        switch prefs.destination {
+        case .clipboard:
+            self.saveToClipboard(cgImage: cgImage)
+        case .file:
+            self.save(cgImage: cgImage, suffix: suffix)
+        }
+    }
+
     private func saveToClipboard(cgImage: CGImage) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -463,6 +668,7 @@ final class ScreenshotManager: ObservableObject {
         if pasteboard.writeObjects([nsImage]) {
             DispatchQueue.main.async { [weak self] in
                 self?.toast.show(text: "Screenshot copied to clipboard")
+                self?.playShutterSoundIfEnabled()
             }
         } else {
             DispatchQueue.main.async { [weak self] in
@@ -473,24 +679,34 @@ final class ScreenshotManager: ObservableObject {
 
     private func save(cgImage: CGImage, suffix: String) {
         let dir = saveDirectory ?? macOSScreenshotDirectory() ?? defaultDesktop()
-        let url = dir.appendingPathComponent(filename(suffix: suffix)).appendingPathExtension("png")
+        let ext = (prefs.imageFormat == .png) ? "png" : "jpg"
+        let url = dir.appendingPathComponent(filename(suffix: suffix)).appendingPathExtension(ext)
         
         do {
             // Ensure directory exists and is writable
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
             
             // Try to save the PNG
-            try savePNG(cgImage: cgImage, to: url)
+            switch prefs.imageFormat {
+            case .png: try savePNG(cgImage: cgImage, to: url)
+            case .jpg: try saveJPG(cgImage: cgImage, to: url, quality: 0.92)
+            }
             DispatchQueue.main.async { [weak self] in
                 self?.toast.show(text: "Saved \(url.lastPathComponent)")
+                self?.playShutterSoundIfEnabled()
             }
         } catch {
             // Fallback to Desktop if the preferred location fails
-            let fallbackURL = defaultDesktop().appendingPathComponent(filename(suffix: suffix)).appendingPathExtension("png")
+            let ext = (prefs.imageFormat == .png) ? "png" : "jpg"
+            let fallbackURL = defaultDesktop().appendingPathComponent(filename(suffix: suffix)).appendingPathExtension(ext)
             do {
-                try savePNG(cgImage: cgImage, to: fallbackURL)
+                switch prefs.imageFormat {
+                case .png: try savePNG(cgImage: cgImage, to: fallbackURL)
+                case .jpg: try saveJPG(cgImage: cgImage, to: fallbackURL, quality: 0.92)
+                }
                 DispatchQueue.main.async { [weak self] in
                     self?.toast.show(text: "Saved to Desktop: \(fallbackURL.lastPathComponent)")
+                    self?.playShutterSoundIfEnabled()
                 }
             } catch {
                 DispatchQueue.main.async { [weak self] in
@@ -515,6 +731,23 @@ final class ScreenshotManager: ObservableObject {
         if !CGImageDestinationFinalize(dest) {
             throw NSError(domain: "ShotBar", code: -2, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationFinalize failed"])
         }
+    }
+
+    private func saveJPG(cgImage: CGImage, to url: URL, quality: Double) throws {
+        let uti = UTType.jpeg.identifier as CFString
+        guard let dest = CGImageDestinationCreateWithURL(url as CFURL, uti, 1, nil) else {
+            throw NSError(domain: "ShotBar", code: -1, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationCreateWithURL failed"])
+        }
+        let props: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: quality]
+        CGImageDestinationAddImage(dest, cgImage, props as CFDictionary)
+        if !CGImageDestinationFinalize(dest) {
+            throw NSError(domain: "ShotBar", code: -2, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationFinalize failed"])
+        }
+    }
+
+    private func playShutterSoundIfEnabled() {
+        guard AppServices.shared.prefs.soundEnabled else { return }
+        NSSound(named: NSSound.Name("Tink"))?.play()
     }
 
     private func defaultDesktop() -> URL {
