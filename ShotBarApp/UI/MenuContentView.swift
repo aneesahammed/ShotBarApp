@@ -21,6 +21,10 @@ struct MenuContentView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .cornerRadius(12)
         .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+        .onAppear {
+            // Store the previous active app before this menubar becomes active
+            shots.storePreviousActiveApp()
+        }
     }
     
     // Header section with light theme
