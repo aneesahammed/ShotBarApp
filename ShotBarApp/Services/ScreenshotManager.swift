@@ -43,6 +43,8 @@ final class ScreenshotManager: ObservableObject {
             guard let self, let selection, let screen else { return }
             Task { @MainActor in
                 do {
+                    // Allow the overlay windows to fully dismiss before capturing
+                    try? await Task.sleep(nanoseconds: 150_000_000)
                     let cg = try await self.captureDisplayRegion(selection: selection, on: screen)
                     self.saveAccordingToPreferences(cgImage: cg, suffix: "Selection")
                     // Hide the menu bar popover after capture
@@ -160,7 +162,7 @@ final class ScreenshotManager: ObservableObject {
                 config.height = pxSize.height
                 
                 // MARK: - Image Quality Enhancement
-                config.captureResolution = .best
+                config.captureResolution = .nominal
                 config.pixelFormat = kCVPixelFormatType_32BGRA
                 config.showsCursor = false
                 config.scalesToFit = false
@@ -193,7 +195,7 @@ final class ScreenshotManager: ObservableObject {
                     config.height = px.height
                     
                     // MARK: - Image Quality Enhancement
-                    config.captureResolution = .best
+                    config.captureResolution = .nominal
                     config.pixelFormat = kCVPixelFormatType_32BGRA
                     config.showsCursor = false
                     config.scalesToFit = false
@@ -271,7 +273,7 @@ final class ScreenshotManager: ObservableObject {
         cfg.height = pixelH
         
         // MARK: - Image Quality Enhancement
-        cfg.captureResolution = .best
+        cfg.captureResolution = .nominal
         cfg.pixelFormat = kCVPixelFormatType_32BGRA
         cfg.showsCursor = false
         cfg.scalesToFit = false
@@ -287,26 +289,30 @@ final class ScreenshotManager: ObservableObject {
     }
     
     private func pixelSize(forDisplay d: SCDisplay) -> (width: Int, height: Int) {
-        // SCDisplay provides a frame in points; convert using NSScreen matching displayID.
-        if let ns = NSScreen.screens.first(where: {
-            ((($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value) == d.displayID)
-        }) {
-            let s = ns.backingScaleFactor
-            let w = Int((ns.frame.width * s).rounded(.toNearestOrEven))
-            let h = Int((ns.frame.height * s).rounded(.toNearestOrEven))
-            return (w, h)
-        }
-        // Fallback: common 1x assumption (shouldn't happen on modern macOS)
-        let w = Int(d.frame.width)
-        let h = Int(d.frame.height)
+        // Always return the display's true native pixel dimensions.
+        // This avoids quality loss on scaled displays where points*backingScaleFactor
+        // may not equal the actual pixel resolution reported by CoreGraphics.
+        let w = Int(CGFloat(CGDisplayPixelsWide(d.displayID)))
+        let h = Int(CGFloat(CGDisplayPixelsHigh(d.displayID)))
         return (w, h)
     }
     
     private func pixelSize(forWindowFrame frame: CGRect) -> (width: Int, height: Int) {
-        // Use main screen scale as a reasonable default
-        let s = NSScreen.main?.backingScaleFactor ?? 2.0
-        let w = Int((frame.width * s).rounded(.toNearestOrEven))
-        let h = Int((frame.height * s).rounded(.toNearestOrEven))
+        // Determine the display under the window and compute true pixels-per-point
+        // using CoreGraphics' native pixel dimensions for that display.
+        guard let windowScreen = NSScreen.screens.first(where: { $0.frame.intersects(frame) }) ?? NSScreen.main,
+              let displayNumber = windowScreen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+        else {
+            // Reasonable fallback using a scale of 2.0 if no screen is found
+            let fallbackScale = 2.0 as CGFloat
+            return (Int(frame.width * fallbackScale), Int(frame.height * fallbackScale))
+        }
+
+        let displayID = CGDirectDisplayID(truncating: displayNumber)
+        let pxPerPtX = CGFloat(CGDisplayPixelsWide(displayID))  / windowScreen.frame.width
+        let pxPerPtY = CGFloat(CGDisplayPixelsHigh(displayID)) / windowScreen.frame.height
+        let w = Int((frame.width  * pxPerPtX).rounded(.towardZero))
+        let h = Int((frame.height * pxPerPtY).rounded(.towardZero))
         return (w, h)
     }
     
@@ -326,20 +332,54 @@ final class ScreenshotManager: ObservableObject {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         
-        // Convert CGImage to NSImage for clipboard
+        // Create high-quality PNG data directly from CGImage
+        guard let pngData = createHighQualityPNGData(from: cgImage) else {
+            DispatchQueue.main.async { [weak self] in
+                self?.toast.show(text: "Failed to create clipboard data")
+            }
+            return
+        }
+        
+        // Also create NSImage for compatibility
         let size = NSSize(width: cgImage.width, height: cgImage.height)
         let nsImage = NSImage(cgImage: cgImage, size: size)
         
-        if pasteboard.writeObjects([nsImage]) {
-            DispatchQueue.main.async { [weak self] in
-                self?.toast.show(text: "Screenshot copied to clipboard")
-                self?.playShutterSoundIfEnabled()
-            }
-        } else {
-            DispatchQueue.main.async { [weak self] in
-                self?.toast.show(text: "Failed to copy to clipboard")
-            }
+        // Write multiple representations to clipboard for best quality preservation
+        pasteboard.declareTypes([.png, .tiff], owner: nil)
+        
+        // Set high-quality PNG data
+        pasteboard.setData(pngData, forType: .png)
+        
+        // Also set TIFF for maximum compatibility and quality
+        if let tiffData = nsImage.tiffRepresentation {
+            pasteboard.setData(tiffData, forType: .tiff)
         }
+        
+        DispatchQueue.main.async { [weak self] in
+            self?.toast.show(text: "Screenshot copied to clipboard")
+            self?.playShutterSoundIfEnabled()
+        }
+    }
+    
+    private func createHighQualityPNGData(from cgImage: CGImage) -> Data? {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else {
+            return nil
+        }
+        
+        // Use the same high-quality PNG properties as file saving
+        let props: [CFString: Any] = [
+            kCGImagePropertyPNGCompressionFilter: 0, // No compression filter for best quality
+            kCGImageDestinationEmbedThumbnail: false
+        ]
+        
+        CGImageDestinationAddImage(destination, cgImage, props as CFDictionary)
+        
+        guard CGImageDestinationFinalize(destination) else {
+            return nil
+        }
+        
+        return data as Data
     }
     
     private func save(cgImage: CGImage, suffix: String) {
