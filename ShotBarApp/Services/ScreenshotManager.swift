@@ -68,22 +68,26 @@ final class ScreenshotManager: ObservableObject {
     func captureActiveWindow() {
         Task { @MainActor in
             do {
+                // First, try to get the previously stored active application
+                guard let previousApp = previousActiveApp else {
+                    self.toast.show(text: "No active window detected. Please focus a window first, then try again.")
+                    return
+                }
+                
                 let content = try await SCShareableContent.current
                 
                 // Get the current ShotBar app bundle identifier to exclude it
                 let currentAppBundleID = Bundle.main.bundleIdentifier ?? "com.shotbarapp.ShotBarApp"
                 
-                // Filter windows to exclude ShotBar and system windows, prioritize user applications
-                let windows = content.windows.filter { win in
+                // Filter windows to only include windows from the previously active app
+                let targetAppWindows = content.windows.filter { win in
                     guard let app = win.owningApplication else { return false }
+                    
+                    // Only include windows from the previously active app
+                    guard app.bundleIdentifier == previousApp.bundleIdentifier else { return false }
                     
                     // Exclude ShotBar app itself
                     if app.bundleIdentifier == currentAppBundleID { return false }
-                    
-                    // Exclude system windows and utilities
-                    if app.bundleIdentifier.hasPrefix("com.apple.") { return false }
-                    if app.bundleIdentifier.hasPrefix("com.apple.systempreferences") { return false }
-                    if app.bundleIdentifier.hasPrefix("com.apple.dt.") { return false }
                     
                     // Only include on-screen windows with reasonable sizes
                     return win.isOnScreen &&
@@ -93,105 +97,56 @@ final class ScreenshotManager: ObservableObject {
                     win.frame.height < 10000
                 }
                 
-                // If we have a stored previous active app, prioritize its windows
-                var sortedWindows = windows
-                if let previousApp = previousActiveApp {
-                    sortedWindows = windows.sorted { win1, win2 in
-                        let isWin1FromPreviousApp = win1.owningApplication?.bundleIdentifier == previousApp.bundleIdentifier
-                        let isWin2FromPreviousApp = win2.owningApplication?.bundleIdentifier == previousApp.bundleIdentifier
-                        
-                        // Prioritize windows from the previous active app
-                        if isWin1FromPreviousApp && !isWin2FromPreviousApp {
-                            return true
-                        }
-                        if !isWin1FromPreviousApp && isWin2FromPreviousApp {
-                            return false
-                        }
-                        
-                        // If both are from the same app, use the existing sorting logic
-                        // Prioritize larger windows (likely main app windows)
-                        let size1 = win1.frame.width * win1.frame.height
-                        let size2 = win2.frame.width * win2.frame.height
-                        
-                        // If size difference is significant, prefer larger
-                        if abs(size1 - size2) > 10000 {
-                            return size1 > size2
-                        }
-                        
-                        // Otherwise, prefer windows that are more centered on screen
-                        let center1 = CGPoint(x: win1.frame.midX, y: win1.frame.midY)
-                        let center2 = CGPoint(x: win2.frame.midX, y: win2.frame.midY)
-                        let screenCenter = CGPoint(x: NSScreen.main?.frame.midX ?? 0, y: NSScreen.main?.frame.midY ?? 0)
-                        
-                        let distance1 = sqrt(pow(center1.x - screenCenter.x, 2) + pow(center1.y - screenCenter.y, 2))
-                        let distance2 = sqrt(pow(center2.x - screenCenter.x, 2) + pow(center2.y - screenCenter.y, 2))
-                        
-                        return distance1 < distance2
-                    }
-                } else {
-                    // Fall back to the original sorting logic if no previous app stored
-                    sortedWindows = windows.sorted { win1, win2 in
-                        // Prioritize larger windows (likely main app windows)
-                        let size1 = win1.frame.width * win1.frame.height
-                        let size2 = win2.frame.width * win2.frame.height
-                        
-                        // If size difference is significant, prefer larger
-                        if abs(size1 - size2) > 10000 {
-                            return size1 > size2
-                        }
-                        
-                        // Otherwise, prefer windows that are more centered on screen
-                        let center1 = CGPoint(x: win1.frame.midX, y: win1.frame.midY)
-                        let center2 = CGPoint(x: win2.frame.midX, y: win2.frame.midY)
-                        let screenCenter = CGPoint(x: NSScreen.main?.frame.midX ?? 0, y: NSScreen.main?.frame.midY ?? 0)
-                        
-                        let distance1 = sqrt(pow(center1.x - screenCenter.x, 2) + pow(center1.y - screenCenter.y, 2))
-                        let distance2 = sqrt(pow(center2.x - screenCenter.x, 2) + pow(center2.y - screenCenter.y, 2))
-                        
-                        return distance1 < distance2
-                    }
-                }
-                
-                guard let target = sortedWindows.first else {
-                    self.toast.show(text: "No captureable window found")
+                guard let targetWindow = targetAppWindows.first else {
+                    self.toast.show(text: "No captureable window found for \(previousApp.localizedName)")
                     return
                 }
                 
-                let filter = SCContentFilter(desktopIndependentWindow: target)
+                // Use the desktopIndependentWindow approach but with better error handling
+                // This should capture only the specific window content
+                let filter = SCContentFilter(desktopIndependentWindow: targetWindow)
                 let config = SCStreamConfiguration()
-                // Render at window size in pixels with quality improvements
-                let pxSize = pixelSize(forWindowFrame: target.frame)
-                // Track pixels-per-point for clipboard DPI
-                let scale = (target.frame.width > 0) ? CGFloat(pxSize.width) / target.frame.width : 1.0
-                self.lastCapturePixelsPerPoint = max(scale, 1.0)
+                
+                // Set configuration to match the window's actual content size
+                let pxSize = pixelSize(forWindowFrame: targetWindow.frame)
                 config.width = pxSize.width
                 config.height = pxSize.height
                 
-                // Favor best quality and compatibility for window capture
+                // Use best quality settings
                 config.captureResolution = .best
                 config.pixelFormat = kCVPixelFormatType_32BGRA
                 config.showsCursor = false
                 config.scalesToFit = false
                 
-                var cg = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                // Track pixels-per-point for clipboard DPI
+                let scale = (targetWindow.frame.width > 0) ? CGFloat(pxSize.width) / targetWindow.frame.width : 1.0
+                self.lastCapturePixelsPerPoint = max(scale, 1.0)
                 
-                // Fallback: Some windows may return black via desktopIndependentWindow
-                // If the result appears black, retry by capturing the window's rect from the display
-                if self.isMostlyBlack(cg) {
-                    if let windowScreen = NSScreen.screens.first(where: { $0.frame.intersects(target.frame) }) ?? NSScreen.main {
+                var capturedImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                
+                // Check if the capture resulted in a black image
+                if self.isMostlyBlack(capturedImage) {
+                    // Fallback: Try to capture just the window area from the display
+                    // but with tighter bounds to avoid capturing overlapping UI
+                    if let windowScreen = NSScreen.screens.first(where: { $0.frame.intersects(targetWindow.frame) }) ?? NSScreen.main {
                         do {
-                            cg = try await self.captureDisplayRegion(selection: target.frame, on: windowScreen)
+                            // Create a tighter selection area to avoid capturing overlapping UI
+                            let tightFrame = createTightWindowFrame(from: targetWindow.frame, on: windowScreen)
+                            capturedImage = try await self.captureDisplayRegion(selection: tightFrame, on: windowScreen)
                         } catch {
-                            // Ignore fallback error; we'll proceed with the original image
+                            // If fallback also fails, show error
+                            self.toast.show(text: "Failed to capture window: \(error.localizedDescription)")
+                            return
                         }
                     }
                 }
                 
-                self.saveAccordingToPreferences(cgImage: cg, suffix: "Window")
+                self.saveAccordingToPreferences(cgImage: capturedImage, suffix: "Window")
                 // Hide the menu bar popover after capture
                 self.hideMenuBarPopover()
+                
             } catch {
-                self.toast.show(text: "Window failed: \(error.localizedDescription)")
+                self.toast.show(text: "Window capture failed: \(error.localizedDescription)")
             }
         }
     }
@@ -613,5 +568,24 @@ final class ScreenshotManager: ObservableObject {
             }
         }
         return nil
+    }
+    
+    // Helper function to create a tighter frame that avoids overlapping UI elements
+    private func createTightWindowFrame(from windowFrame: CGRect, on screen: NSScreen) -> CGRect {
+        // Reduce the frame size slightly to avoid capturing overlapping UI elements
+        let inset: CGFloat = 2.0 // 2 points inset to avoid borders and overlapping elements
+        
+        var tightFrame = windowFrame.insetBy(dx: inset, dy: inset)
+        
+        // Ensure the frame doesn't go outside the screen bounds
+        let screenFrame = screen.frame
+        tightFrame = tightFrame.intersection(screenFrame)
+        
+        // Ensure minimum size
+        if tightFrame.width < 50 || tightFrame.height < 50 {
+            tightFrame = windowFrame // Fall back to original frame if too small
+        }
+        
+        return tightFrame
     }
 }
