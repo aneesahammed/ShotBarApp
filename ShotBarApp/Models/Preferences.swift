@@ -8,7 +8,7 @@ final class Preferences: ObservableObject, UserDefaultsSavable {
     @Published var windowHotkey: Hotkey?    { didSet { save() } }
     @Published var screenHotkey: Hotkey?    { didSet { save() } }
     @Published var imageFormat: ImageFormat = .png { didSet { save() } }
-    @Published var destination: Destination = .file { didSet { save() } }
+    @Published var destination: Destination = .clipboard { didSet { save() } }
     @Published var soundEnabled: Bool = true { didSet { save() } }
     
     private let defaults = UserDefaults.standard
