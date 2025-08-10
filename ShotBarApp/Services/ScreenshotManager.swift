@@ -14,6 +14,9 @@ final class ScreenshotManager: ObservableObject {
     private let toast = Toast()
     private var prefs: Preferences { AppServices.shared.prefs }
     
+    // Persist capture scale (pixels-per-point) for accurate clipboard DPI/size
+    private var lastCapturePixelsPerPoint: CGFloat = 1.0
+    
     // Add property to store the previous active application
     private var previousActiveApp: NSRunningApplication?
     
@@ -83,11 +86,11 @@ final class ScreenshotManager: ObservableObject {
                     if app.bundleIdentifier.hasPrefix("com.apple.dt.") { return false }
                     
                     // Only include on-screen windows with reasonable sizes
-                    return win.isOnScreen && 
-                           win.frame.width > 100 && 
-                           win.frame.height > 100 &&
-                           win.frame.width < 10000 && 
-                           win.frame.height < 10000
+                    return win.isOnScreen &&
+                    win.frame.width > 100 &&
+                    win.frame.height > 100 &&
+                    win.frame.width < 10000 &&
+                    win.frame.height < 10000
                 }
                 
                 // If we have a stored previous active app, prioritize its windows
@@ -158,16 +161,32 @@ final class ScreenshotManager: ObservableObject {
                 let config = SCStreamConfiguration()
                 // Render at window size in pixels with quality improvements
                 let pxSize = pixelSize(forWindowFrame: target.frame)
+                // Track pixels-per-point for clipboard DPI
+                let scale = (target.frame.width > 0) ? CGFloat(pxSize.width) / target.frame.width : 1.0
+                self.lastCapturePixelsPerPoint = max(scale, 1.0)
                 config.width = pxSize.width
                 config.height = pxSize.height
                 
-                // MARK: - Image Quality Enhancement
-                config.captureResolution = .nominal
+                // Favor best quality and compatibility for window capture
+                config.captureResolution = .best
                 config.pixelFormat = kCVPixelFormatType_32BGRA
                 config.showsCursor = false
                 config.scalesToFit = false
                 
-                let cg = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                var cg = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                
+                // Fallback: Some windows may return black via desktopIndependentWindow
+                // If the result appears black, retry by capturing the window's rect from the display
+                if self.isMostlyBlack(cg) {
+                    if let windowScreen = NSScreen.screens.first(where: { $0.frame.intersects(target.frame) }) ?? NSScreen.main {
+                        do {
+                            cg = try await self.captureDisplayRegion(selection: target.frame, on: windowScreen)
+                        } catch {
+                            // Ignore fallback error; we'll proceed with the original image
+                        }
+                    }
+                }
+                
                 self.saveAccordingToPreferences(cgImage: cg, suffix: "Window")
                 // Hide the menu bar popover after capture
                 self.hideMenuBarPopover()
@@ -191,6 +210,13 @@ final class ScreenshotManager: ObservableObject {
                     let filter = SCContentFilter(display: d, excludingWindows: [])
                     let config = SCStreamConfiguration()
                     let px = pixelSize(forDisplay: d)
+                    // Track pixels-per-point for clipboard DPI based on matching NSScreen
+                    if let ns = NSScreen.screens.first(where: { (($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value) == d.displayID }) {
+                        let scale = CGFloat(px.width) / ns.frame.width
+                        self.lastCapturePixelsPerPoint = max(scale, 1.0)
+                    } else {
+                        self.lastCapturePixelsPerPoint = max(CGFloat(px.width) / CGFloat(d.width), 1.0)
+                    }
                     config.width = px.width
                     config.height = px.height
                     
@@ -227,8 +253,8 @@ final class ScreenshotManager: ObservableObject {
         }
     }
     
-    // MARK: SCK helpers
     
+    // MARK: SCK helpers - FIXED FOR HIGH QUALITY SELECTION CAPTURE
     private func captureDisplayRegion(selection: CGRect, on screen: NSScreen) async throws -> CGImage {
         let content = try await SCShareableContent.current
         
@@ -244,41 +270,65 @@ final class ScreenshotManager: ObservableObject {
             throw NSError(domain: "ShotBar", code: -10, userInfo: [NSLocalizedDescriptionKey: "Display mapping failed"])
         }
         
-        // True pixels per point (robust on scaled/Sidecar displays)
-        let pxPerPtX = CGFloat(CGDisplayPixelsWide(displayID))  / screen.frame.width
-        let pxPerPtY = CGFloat(CGDisplayPixelsHigh(displayID)) / screen.frame.height
+        // Get the native display resolution
+        let displayPixelWidth = CGFloat(CGDisplayPixelsWide(displayID))
+        let displayPixelHeight = CGFloat(CGDisplayPixelsHigh(displayID))
         
-        // selection is in GLOBAL points → make it screen-local points
-        var local = selection
-        local.origin.x -= screen.frame.minX
-        local.origin.y -= screen.frame.minY
+        // Calculate true pixels per point (handles Retina/scaled displays correctly)
+        let pxPerPtX = displayPixelWidth / screen.frame.width
+        let pxPerPtY = displayPixelHeight / screen.frame.height
         
-        // Convert to display-local PIXELS (origin = TOP-LEFT)
-        let pixelX = Int((local.origin.x * pxPerPtX).rounded(.towardZero))
-        let pixelW = Int((local.size.width * pxPerPtX).rounded(.towardZero))
-        let pixelH = Int((local.size.height * pxPerPtY).rounded(.towardZero))
+        // Convert selection from global coordinates to screen-local coordinates
+        var localSelection = selection
+        localSelection.origin.x -= screen.frame.minX
+        localSelection.origin.y -= screen.frame.minY
         
-        // Y: distance from top to TOP edge of the selection
-        let pixelYFromTop = Int(((screen.frame.height - (local.origin.y + local.size.height)) * pxPerPtY)
-            .rounded(.towardZero))
+        // Convert to pixel coordinates - use proper rounding
+        let pixelX = Int(round(localSelection.origin.x * pxPerPtX))
+        let pixelW = Int(round(localSelection.size.width * pxPerPtX))
+        let pixelH = Int(round(localSelection.size.height * pxPerPtY))
         
-        guard pixelW >= 4, pixelH >= 4 else {
+        // Calculate Y coordinate (SCDisplay uses top-left origin)
+        let pixelYFromTop = Int(round((screen.frame.height - (localSelection.origin.y + localSelection.size.height)) * pxPerPtY))
+        
+        // Ensure minimum size
+        guard pixelW >= 1, pixelH >= 1 else {
             throw NSError(domain: "ShotBar", code: -11, userInfo: [NSLocalizedDescriptionKey: "Selection too small"])
         }
         
+        // CRITICAL FIX: Capture the entire display first, then crop
+        // This ensures we get the full native resolution quality
         let filter = SCContentFilter(display: scDisplay, excludingWindows: [])
         let cfg = SCStreamConfiguration()
-        cfg.sourceRect = CGRect(x: pixelX, y: pixelYFromTop, width: pixelW, height: pixelH)
-        cfg.width  = pixelW
-        cfg.height = pixelH
         
-        // MARK: - Image Quality Enhancement
-        cfg.captureResolution = .nominal
+        // Set to capture full display at native resolution
+        cfg.width = Int(displayPixelWidth)
+        cfg.height = Int(displayPixelHeight)
+        
+        // Use best quality settings
+        cfg.captureResolution = .best
         cfg.pixelFormat = kCVPixelFormatType_32BGRA
         cfg.showsCursor = false
         cfg.scalesToFit = false
+        cfg.minimumFrameInterval = CMTime(value: 1, timescale: 60)
         
-        return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
+        // Set color space for proper color reproduction
+        cfg.colorSpaceName = CGColorSpace.displayP3
+        
+        // Track the actual scale for DPI metadata
+        self.lastCapturePixelsPerPoint = max(pxPerPtX, pxPerPtY)
+        
+        // Capture the full display
+        let fullImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
+        
+        // Now crop to the selection area
+        let cropRect = CGRect(x: pixelX, y: pixelYFromTop, width: pixelW, height: pixelH)
+        
+        guard let croppedImage = fullImage.cropping(to: cropRect) else {
+            throw NSError(domain: "ShotBar", code: -12, userInfo: [NSLocalizedDescriptionKey: "Failed to crop image"])
+        }
+        
+        return croppedImage
     }
     
     static func promptForPermissionIfNeeded() {
@@ -307,7 +357,7 @@ final class ScreenshotManager: ObservableObject {
             let fallbackScale = 2.0 as CGFloat
             return (Int(frame.width * fallbackScale), Int(frame.height * fallbackScale))
         }
-
+        
         let displayID = CGDirectDisplayID(truncating: displayNumber)
         let pxPerPtX = CGFloat(CGDisplayPixelsWide(displayID))  / windowScreen.frame.width
         let pxPerPtY = CGFloat(CGDisplayPixelsHigh(displayID)) / windowScreen.frame.height
@@ -332,28 +382,33 @@ final class ScreenshotManager: ObservableObject {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         
-        // Create high-quality PNG data directly from CGImage
-        guard let pngData = createHighQualityPNGData(from: cgImage) else {
+        // Build an NSBitmapImageRep with a logical size that encodes the correct scale (points)
+        let imageRep = NSBitmapImageRep(cgImage: cgImage)
+        let scale = max(self.lastCapturePixelsPerPoint, 1.0)
+        let logicalSize = NSSize(width: CGFloat(cgImage.width) / scale, height: CGFloat(cgImage.height) / scale)
+        imageRep.size = logicalSize
+        
+        // Create NSImage carrying the rep and size metadata
+        let nsImage = NSImage(size: logicalSize)
+        nsImage.addRepresentation(imageRep)
+        
+        // Prepare PNG data with DPI metadata matching the scale
+        let targetDPI = 72.0 * Double(scale)
+        guard let pngData = createHighQualityPNGData(from: cgImage, dpi: targetDPI) else {
             DispatchQueue.main.async { [weak self] in
                 self?.toast.show(text: "Failed to create clipboard data")
             }
             return
         }
         
-        // Also create NSImage for compatibility
-        let size = NSSize(width: cgImage.width, height: cgImage.height)
-        let nsImage = NSImage(cgImage: cgImage, size: size)
-        
-        // Write multiple representations to clipboard for best quality preservation
-        pasteboard.declareTypes([.png, .tiff], owner: nil)
-        
-        // Set high-quality PNG data
-        pasteboard.setData(pngData, forType: .png)
-        
-        // Also set TIFF for maximum compatibility and quality
-        if let tiffData = nsImage.tiffRepresentation {
+        // Write both TIFF (with explicit DPI) and PNG (with DPI) to clipboard
+        pasteboard.declareTypes([.tiff, .png], owner: nil)
+        if let tiffData = createHighQualityTIFFData(from: cgImage, dpi: targetDPI) {
             pasteboard.setData(tiffData, forType: .tiff)
+        } else if let tiffFallback = nsImage.tiffRepresentation {
+            pasteboard.setData(tiffFallback, forType: .tiff)
         }
+        pasteboard.setData(pngData, forType: .png)
         
         DispatchQueue.main.async { [weak self] in
             self?.toast.show(text: "Screenshot copied to clipboard")
@@ -361,17 +416,23 @@ final class ScreenshotManager: ObservableObject {
         }
     }
     
-    private func createHighQualityPNGData(from cgImage: CGImage) -> Data? {
+    private func createHighQualityPNGData(from cgImage: CGImage, dpi: Double? = nil) -> Data? {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else {
             return nil
         }
         
-        // Use the same high-quality PNG properties as file saving
-        let props: [CFString: Any] = [
-            kCGImagePropertyPNGCompressionFilter: 0, // No compression filter for best quality
+        // Use high-quality PNG properties; include DPI when available
+        var props: [CFString: Any] = [
+            kCGImagePropertyPNGCompressionFilter: 0,
             kCGImageDestinationEmbedThumbnail: false
         ]
+        if let dpi {
+            props[kCGImagePropertyDPIWidth] = dpi
+            props[kCGImagePropertyDPIHeight] = dpi
+            // PNG doesn't have a DPI unit key; consumers assume inches
+        }
+        props[kCGImagePropertyColorModel] = kCGImagePropertyColorModelRGB
         
         CGImageDestinationAddImage(destination, cgImage, props as CFDictionary)
         
@@ -380,6 +441,67 @@ final class ScreenshotManager: ObservableObject {
         }
         
         return data as Data
+    }
+    
+    private func createHighQualityTIFFData(from cgImage: CGImage, dpi: Double? = nil) -> Data? {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, UTType.tiff.identifier as CFString, 1, nil) else {
+            return nil
+        }
+        
+        var props: [CFString: Any] = [
+            kCGImageDestinationEmbedThumbnail: false,
+            kCGImagePropertyColorModel: kCGImagePropertyColorModelRGB
+        ]
+        if let dpi {
+            props[kCGImagePropertyDPIWidth] = dpi
+            props[kCGImagePropertyDPIHeight] = dpi
+            props[kCGImagePropertyTIFFDictionary] = [
+                kCGImagePropertyTIFFXResolution: dpi,
+                kCGImagePropertyTIFFYResolution: dpi,
+                kCGImagePropertyTIFFResolutionUnit: 2 // inches
+            ] as CFDictionary
+        }
+        
+        CGImageDestinationAddImage(destination, cgImage, props as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return data as Data
+    }
+    
+    // MARK: - Heuristics
+    private func isMostlyBlack(_ cgImage: CGImage) -> Bool {
+        guard let provider = cgImage.dataProvider, let data = provider.data as Data? else { return false }
+        let bytesPerPixel = max(cgImage.bitsPerPixel / 8, 1)
+        let sampleStride = max(bytesPerPixel * 97, 4)
+        let maxSamples = min(50_000, data.count / sampleStride)
+        if maxSamples == 0 { return false }
+        var nonBlackCount = 0
+        var index = 0
+        for _ in 0..<maxSamples {
+            if index + bytesPerPixel <= data.count {
+                let r, g, b: Int
+                // Try to handle both BGRA and ARGB without depending on bitmapInfo
+                if bytesPerPixel >= 4 {
+                    // Read four bytes
+                    let byte0 = Int(data[index])
+                    let byte1 = Int(data[index+1])
+                    let byte2 = Int(data[index+2])
+                    let byte3 = Int(data[index+3])
+                    // Heuristic: if alpha is at either end, choose the brightest trio
+                    let sumRGB0 = byte0 + byte1 + byte2
+                    let sumRGB1 = byte1 + byte2 + byte3
+                    let sumRGB2 = byte0 + byte2 + byte3
+                    let sumRGB3 = byte0 + byte1 + byte3
+                    let sum = max(sumRGB0, max(sumRGB1, max(sumRGB2, sumRGB3)))
+                    if sum > 5 { nonBlackCount += 1 }
+                } else {
+                    if Int(data[index]) > 5 { nonBlackCount += 1 }
+                }
+            }
+            index += sampleStride
+        }
+        let fraction = Double(nonBlackCount) / Double(maxSamples)
+        return fraction < 0.01
     }
     
     private func save(cgImage: CGImage, suffix: String) {
