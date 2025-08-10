@@ -21,10 +21,7 @@ struct MenuContentView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .cornerRadius(12)
         .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
-        .onAppear {
-            // Store the previous active app before this menubar becomes active
-            shots.storePreviousActiveApp()
-        }
+        // Remove the onAppear modifier since it's too late
     }
     
     // Header section with light theme
@@ -144,11 +141,31 @@ struct MenuContentView: View {
                 shots.captureSelection()
             }
             
-            menuItem(icon: "macwindow.on.rectangle",
-                     title: actionTitle("Capture Active Window"),
-                     shortcut: "⌃⇧⌘4") {
+            // Window capture button
+            Button(action: {
+                // Store the previous active app right before capturing
+                shots.storePreviousActiveApp()
                 shots.captureActiveWindow()
+            }) {
+                HStack(spacing: 10) {
+                    Image(systemName: "macwindow.on.rectangle")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.blue)
+                        .frame(width: 20)
+                    
+                    Text(actionTitle("Capture Active Window"))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    Text("⌃⇧⌘4")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             
             menuItem(icon: "display",
                      title: actionTitle("Capture Full Screen(s)"),

@@ -25,6 +25,8 @@ final class ScreenshotManager: ObservableObject {
     func revealSaveLocationInFinder() {
         let dir = saveDirectory ?? macOSScreenshotDirectory() ?? defaultDesktop()
         NSWorkspace.shared.activateFileViewerSelecting([dir])
+        // Hide the menu bar popover after revealing folder
+        hideMenuBarPopover()
     }
     
     // MARK: Entry points
@@ -36,6 +38,8 @@ final class ScreenshotManager: ObservableObject {
                 do {
                     let cg = try await self.captureDisplayRegion(selection: selection, on: screen)
                     self.saveAccordingToPreferences(cgImage: cg, suffix: "Selection")
+                    // Hide the menu bar popover after capture
+                    self.hideMenuBarPopover()
                 } catch {
                     self.toast.show(text: "Selection failed: \(error.localizedDescription)")
                 }
@@ -43,8 +47,9 @@ final class ScreenshotManager: ObservableObject {
         }
     }
     
-    // Make this method public so MenuContentView can call it
+    // Make this method public so it can be called before the menubar becomes active
     func storePreviousActiveApp() {
+        // Store the current frontmost app before our menubar becomes active
         previousActiveApp = NSWorkspace.shared.frontmostApplication
     }
     
@@ -148,6 +153,8 @@ final class ScreenshotManager: ObservableObject {
                 config.height = pxSize.height
                 let cg = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
                 self.saveAccordingToPreferences(cgImage: cg, suffix: "Window")
+                // Hide the menu bar popover after capture
+                self.hideMenuBarPopover()
             } catch {
                 self.toast.show(text: "Window failed: \(error.localizedDescription)")
             }
@@ -177,10 +184,23 @@ final class ScreenshotManager: ObservableObject {
                 }
                 if saved == 0 {
                     self.toast.show(text: "Full screen capture failed")
+                } else {
+                    // Hide the menu bar popover after successful capture
+                    self.hideMenuBarPopover()
                 }
             } catch {
                 self.toast.show(text: "Full screen failed: \(error.localizedDescription)")
             }
+        }
+    }
+    
+    // MARK: Menu Management
+    
+    private func hideMenuBarPopover() {
+        // Post notification to hide the menu bar popover
+        // This will be handled by the AppDelegate to close the popover
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            NotificationCenter.default.post(name: NSNotification.Name("HideMenuBarPopover"), object: nil)
         }
     }
     
