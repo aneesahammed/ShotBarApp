@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import ScreenCaptureKit
 import CoreGraphics
+import CoreVideo
 import ImageIO
 import UniformTypeIdentifiers
 import AppKit
@@ -153,10 +154,17 @@ final class ScreenshotManager: ObservableObject {
                 
                 let filter = SCContentFilter(desktopIndependentWindow: target)
                 let config = SCStreamConfiguration()
-                // Render at window size in pixels
+                // Render at window size in pixels with quality improvements
                 let pxSize = pixelSize(forWindowFrame: target.frame)
                 config.width = pxSize.width
                 config.height = pxSize.height
+                
+                // MARK: - Image Quality Enhancement
+                config.captureResolution = .best
+                config.pixelFormat = kCVPixelFormatType_32BGRA
+                config.showsCursor = false
+                config.scalesToFit = false
+                
                 let cg = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
                 self.saveAccordingToPreferences(cgImage: cg, suffix: "Window")
                 // Hide the menu bar popover after capture
@@ -183,6 +191,13 @@ final class ScreenshotManager: ObservableObject {
                     let px = pixelSize(forDisplay: d)
                     config.width = px.width
                     config.height = px.height
+                    
+                    // MARK: - Image Quality Enhancement
+                    config.captureResolution = .best
+                    config.pixelFormat = kCVPixelFormatType_32BGRA
+                    config.showsCursor = false
+                    config.scalesToFit = false
+                    
                     let cg = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
                     let suffix = displays.count > 1 ? "Display\(i+1)" : "Screen"
                     self.saveAccordingToPreferences(cgImage: cg, suffix: suffix)
@@ -255,6 +270,12 @@ final class ScreenshotManager: ObservableObject {
         cfg.width  = pixelW
         cfg.height = pixelH
         
+        // MARK: - Image Quality Enhancement
+        cfg.captureResolution = .best
+        cfg.pixelFormat = kCVPixelFormatType_32BGRA
+        cfg.showsCursor = false
+        cfg.scalesToFit = false
+        
         return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
     }
     
@@ -288,6 +309,7 @@ final class ScreenshotManager: ObservableObject {
         let h = Int((frame.height * s).rounded(.toNearestOrEven))
         return (w, h)
     }
+    
     
     // MARK: Saving
     
@@ -334,7 +356,7 @@ final class ScreenshotManager: ObservableObject {
             // Try to save the image
             switch prefs.imageFormat {
             case .png: try savePNG(cgImage: cgImage, to: url)
-            case .jpg: try saveJPG(cgImage: cgImage, to: url, quality: 0.92)
+            case .jpg: try saveJPG(cgImage: cgImage, to: url, quality: 1.0)
             }
             print("Successfully saved screenshot to: \(url.path)")
             DispatchQueue.main.async { [weak self] in
@@ -365,7 +387,13 @@ final class ScreenshotManager: ObservableObject {
         guard let dest = CGImageDestinationCreateWithURL(url as CFURL, uti, 1, nil) else {
             throw NSError(domain: "ShotBar", code: -1, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationCreateWithURL failed"])
         }
-        CGImageDestinationAddImage(dest, cgImage, nil)
+        
+        // Add image metadata and properties for better quality
+        let props: [CFString: Any] = [
+            kCGImagePropertyPNGCompressionFilter: 0, // No compression filter for best quality
+            kCGImageDestinationEmbedThumbnail: false
+        ]
+        CGImageDestinationAddImage(dest, cgImage, props as CFDictionary)
         if !CGImageDestinationFinalize(dest) {
             throw NSError(domain: "ShotBar", code: -2, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationFinalize failed"])
         }
@@ -376,7 +404,14 @@ final class ScreenshotManager: ObservableObject {
         guard let dest = CGImageDestinationCreateWithURL(url as CFURL, uti, 1, nil) else {
             throw NSError(domain: "ShotBar", code: -1, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationCreateWithURL failed"])
         }
-        let props: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: quality]
+        
+        // Enhanced JPEG properties for better quality
+        let props: [CFString: Any] = [
+            kCGImageDestinationLossyCompressionQuality: quality,
+            kCGImageDestinationEmbedThumbnail: false,
+            kCGImagePropertyColorModel: kCGImagePropertyColorModelRGB,
+            kCGImagePropertyOrientation: 1
+        ]
         CGImageDestinationAddImage(dest, cgImage, props as CFDictionary)
         if !CGImageDestinationFinalize(dest) {
             throw NSError(domain: "ShotBar", code: -2, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationFinalize failed"])
