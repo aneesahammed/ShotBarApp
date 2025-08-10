@@ -19,11 +19,17 @@ final class ScreenshotManager: ObservableObject {
     // MARK: Save location
     
     func refreshSaveDirectory() {
-        saveDirectory = macOSScreenshotDirectory() ?? defaultDesktop()
+        // Use the app's Documents directory instead of Desktop to avoid permission issues
+        // The Desktop directory requires special entitlements and can cause sandbox permission errors
+        // The Documents directory is always accessible within the app's sandbox
+        let documentsDir = appDocumentsDirectory()
+        saveDirectory = documentsDir
+        print("Save directory set to: \(documentsDir.path)")
     }
     
     func revealSaveLocationInFinder() {
-        let dir = saveDirectory ?? macOSScreenshotDirectory() ?? defaultDesktop()
+        // Always reveal the app's Documents directory where screenshots are saved
+        let dir = appDocumentsDirectory()
         NSWorkspace.shared.activateFileViewerSelecting([dir])
         // Hide the menu bar popover after revealing folder
         hideMenuBarPopover()
@@ -315,40 +321,35 @@ final class ScreenshotManager: ObservableObject {
     }
     
     private func save(cgImage: CGImage, suffix: String) {
-        let dir = saveDirectory ?? macOSScreenshotDirectory() ?? defaultDesktop()
+        let dir = saveDirectory ?? appDocumentsDirectory()
         let ext = (prefs.imageFormat == .png) ? "png" : "jpg"
         let url = dir.appendingPathComponent(filename(suffix: suffix)).appendingPathExtension(ext)
+        
+        print("Attempting to save screenshot to: \(url.path)")
         
         do {
             // Ensure directory exists and is writable
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
             
-            // Try to save the PNG
+            // Try to save the image
             switch prefs.imageFormat {
             case .png: try savePNG(cgImage: cgImage, to: url)
             case .jpg: try saveJPG(cgImage: cgImage, to: url, quality: 0.92)
             }
+            print("Successfully saved screenshot to: \(url.path)")
             DispatchQueue.main.async { [weak self] in
                 self?.toast.show(text: "Saved \(url.lastPathComponent)")
                 self?.playShutterSoundIfEnabled()
             }
         } catch {
-            // Fallback to Desktop if the preferred location fails
-            let ext = (prefs.imageFormat == .png) ? "png" : "jpg"
-            let fallbackURL = defaultDesktop().appendingPathComponent(filename(suffix: suffix)).appendingPathExtension(ext)
-            do {
-                switch prefs.imageFormat {
-                case .png: try savePNG(cgImage: cgImage, to: fallbackURL)
-                case .jpg: try saveJPG(cgImage: cgImage, to: fallbackURL, quality: 0.92)
-                }
-                DispatchQueue.main.async { [weak self] in
-                    self?.toast.show(text: "Saved to Desktop: \(fallbackURL.lastPathComponent)")
-                    self?.playShutterSoundIfEnabled()
-                }
-            } catch {
-                DispatchQueue.main.async { [weak self] in
-                    self?.toast.show(text: "Save failed: \(error.localizedDescription)")
-                }
+            // Log the error for debugging
+            print("Save failed: \(error)")
+            print("Save directory: \(dir.path)")
+            print("Save URL: \(url.path)")
+            
+            // If saving to the preferred location fails, show error message
+            DispatchQueue.main.async { [weak self] in
+                self?.toast.show(text: "Save failed: \(error.localizedDescription)")
             }
         }
     }
@@ -385,6 +386,20 @@ final class ScreenshotManager: ObservableObject {
     private func playShutterSoundIfEnabled() {
         guard AppServices.shared.prefs.soundEnabled else { return }
         NSSound(named: NSSound.Name("Tink"))?.play()
+    }
+    
+    private func appDocumentsDirectory() -> URL {
+        // Get the app's Documents directory and ensure it exists
+        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        
+        // Create the directory if it doesn't exist
+        do {
+            try FileManager.default.createDirectory(at: documentsURL, withIntermediateDirectories: true, attributes: nil)
+        } catch {
+            print("Warning: Could not create Documents directory: \(error)")
+        }
+        
+        return documentsURL
     }
     
     private func defaultDesktop() -> URL {
