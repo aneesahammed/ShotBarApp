@@ -10,6 +10,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = AppServices.shared // touch singletons to init
         setupMenuBar()
+        setupMainMenu()
+        
+        // Ensure the app shows in dock and has proper icon
+        NSApp.setActivationPolicy(.regular)
     }
     
     private func setupMenuBar() {
@@ -40,6 +44,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
     
+    private func setupMainMenu() {
+        let mainMenu = NSMenu()
+        
+        // App menu
+        let appMenu = NSMenu()
+        let appMenuItem = NSMenuItem()
+        appMenuItem.submenu = appMenu
+        
+        // About menu item
+        let aboutItem = NSMenuItem(title: "About ShotBar", action: #selector(showAbout), keyEquivalent: "")
+        aboutItem.target = self
+        appMenu.addItem(aboutItem)
+        
+        appMenu.addItem(NSMenuItem.separator())
+        
+        // Preferences menu item
+        let preferencesItem = NSMenuItem(title: "Preferences...", action: #selector(showPreferences), keyEquivalent: ",")
+        preferencesItem.target = self
+        appMenu.addItem(preferencesItem)
+        
+        appMenu.addItem(NSMenuItem.separator())
+        
+        // Services menu
+        let servicesMenu = NSMenu()
+        let servicesItem = NSMenuItem(title: "Services", action: nil, keyEquivalent: "")
+        servicesItem.submenu = servicesMenu
+        appMenu.addItem(servicesItem)
+        
+        appMenu.addItem(NSMenuItem.separator())
+        
+        // Hide and Quit menu items
+        let hideItem = NSMenuItem(title: "Hide ShotBar", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(hideItem)
+        
+        let hideOthersItem = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthersItem.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(hideOthersItem)
+        
+        let showAllItem = NSMenuItem(title: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(showAllItem)
+        
+        appMenu.addItem(NSMenuItem.separator())
+        
+        let quitItem = NSMenuItem(title: "Quit ShotBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(quitItem)
+        
+        mainMenu.addItem(appMenuItem)
+        
+        // Set the main menu
+        NSApplication.shared.mainMenu = mainMenu
+    }
+    
     @objc private func togglePopover() {
         if let popover = popover {
             if popover.isShown {
@@ -58,6 +114,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     
     @objc private func hidePopover() {
         popover?.performClose(nil)
+    }
+    
+    @objc private func showAbout() {
+        // Use the standard macOS About panel which will automatically use the AppIcon
+        NSApp.orderFrontStandardAboutPanel()
+    }
+    
+    @objc private func showPreferences() {
+        // Open the SwiftUI settings window
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
     }
 }
 

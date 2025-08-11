@@ -50,9 +50,16 @@ struct MenuContentView: View {
             Spacer()
             
             // Settings gear icon
-            Image(systemName: "gearshape")
-                .font(.title2)
-                .foregroundStyle(.secondary)
+            Button(action: {
+                // Open the SwiftUI preferences window
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            }) {
+                Image(systemName: "gearshape")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Open Settings")
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
@@ -203,6 +210,18 @@ struct MenuContentView: View {
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 6)
+            
+            // Divider
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor))
+                .frame(height: 1)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+            
+            // About menu item
+            menuItem(icon: "info.circle", title: "About ShotBar", shortcut: nil) {
+                NSApp.orderFrontStandardAboutPanel()
+            }
             
             // Quit row
             menuItem(icon: "power", title: "Quit", shortcut: nil) {
