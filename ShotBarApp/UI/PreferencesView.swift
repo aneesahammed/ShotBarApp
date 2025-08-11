@@ -1,6 +1,15 @@
 import SwiftUI
 
 // MARK: - Preferences UI
+struct PreferencesView_Previews: PreviewProvider {
+    static var previews: some View {
+        PreferencesView(
+            prefs: Preferences(),
+            shots: ScreenshotManager()
+        )
+        .frame(width: 400, height: 300)
+    }
+}
 
 struct PreferencesView: View {
     @ObservedObject var prefs: Preferences
@@ -8,38 +17,7 @@ struct PreferencesView: View {
     
     var body: some View {
         Form {
-            Section("Default Behavior") {
-                HStack {
-                    Text("Format")
-                    Spacer()
-                    Picker("Format", selection: $prefs.imageFormat) {
-                        ForEach(ImageFormat.allCases) { f in Text(f.id) }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 160)
-                }
-                HStack {
-                    Text("Destination")
-                    Spacer()
-                    Picker("Destination", selection: $prefs.destination) {
-                        Text("File").tag(Destination.file)
-                        Text("Clipboard").tag(Destination.clipboard)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 220)
-                }
-                Toggle("Sound", isOn: $prefs.soundEnabled)
-            }
-            Section("Save Location") {
-                HStack {
-                    Text(shots.saveDirectory?.path ?? "Using system screenshot folder")
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                    Spacer()
-                    Button("Reveal") { shots.revealSaveLocationInFinder() }
-                }
-                Text("Honors macOS screenshot location (defaults domain com.apple.screencapture).")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
+            
             
             Section("Hotkeys (global)") {
                 HotkeyPickerRow(title: "Selection", selection: $prefs.selectionHotkey)
@@ -48,16 +26,20 @@ struct PreferencesView: View {
                 Text("Tip: Some keyboards require holding Fn for F-keys unless you enable \"Use F1, F2, etc. as standard function keys\".")
                     .font(.caption2).foregroundStyle(.secondary)
             }
+            .padding(.bottom, 3)
             
             Section("Permissions") {
-                Button("Check Screen Recording Permission") {
+                Button("Check Permission") {
                     ScreenshotManager.promptForPermissionIfNeeded()
                 }
-                Text("If captures fail, grant Screen & System Audio Recording in System Settings → Privacy & Security.")
+                Text("If captures fail, grant permissions in System Settings → Privacy.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
+
+
         }
-        .padding()
+        .padding(16)
+        .padding(.horizontal, 16)
     }
 }
 
@@ -68,7 +50,7 @@ struct HotkeyPickerRow: View {
     var body: some View {
         HStack {
             Text(title)
-            Spacer()
+//            Spacer()
             Picker("", selection: Binding(
                 get: { selection?.id ?? "none" },
                 set: { newID in
@@ -83,5 +65,7 @@ struct HotkeyPickerRow: View {
                 .pickerStyle(.menu)
                 .frame(width: 120)
         }
+        .padding(.horizontal, 24) // margin from other elements
+        
     }
 }
