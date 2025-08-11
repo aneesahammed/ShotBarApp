@@ -14,7 +14,7 @@ A modern, lightweight macOS screenshot utility built with SwiftUI and ScreenCapt
 </div>
 
 ## ✨ Screenshot
-![](https://github.com/user-attachments/assets/071e3be1-ee02-4ac8-b8f0-e2057357b0f3)
+<img width="277" height="247" alt="Image" src="https://github.com/user-attachments/assets/071e3be1-ee02-4ac8-b8f0-e2057357b0f3" />
 
 
 ## ✨ Features
