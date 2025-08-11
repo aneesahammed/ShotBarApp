@@ -53,3 +53,7 @@ Documents/Shared Playground Data/
 
 # Environment files
 .env
+
+# Build output
+dist/
+ShotBarApp-*.dmg
