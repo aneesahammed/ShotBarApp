@@ -458,27 +458,38 @@ final class ScreenshotManager: ObservableObject {
         
         print("Attempting to save screenshot to: \(url.path)")
         
+        let scale = max(self.lastCapturePixelsPerPoint, 1.0)
+        let logicalSize = NSSize(width: CGFloat(cgImage.width) / scale, height: CGFloat(cgImage.height) / scale)
+        
+        let imageRep = NSBitmapImageRep(cgImage: cgImage)
+        imageRep.size = logicalSize
+        
         do {
-            // Ensure directory exists and is writable
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
             
-            // Try to save the image
-            switch prefs.imageFormat {
-            case .png: try savePNG(cgImage: cgImage, to: url)
-            case .jpg: try saveJPG(cgImage: cgImage, to: url, quality: 1.0)
+            let data: Data?
+            if prefs.imageFormat == .png {
+                // No compression for PNG (lossless anyway, but faster/larger files)
+                data = imageRep.representation(using: .png, properties: [.compressionFactor: 0.0])
+            } else {
+                // Max quality for JPEG
+                data = imageRep.representation(using: .jpeg, properties: [.compressionFactor: 1.0])
             }
+            
+            guard let data else {
+                throw NSError(domain: "ShotBar", code: -3, userInfo: [NSLocalizedDescriptionKey: "Failed to generate image data"])
+            }
+            
+            try data.write(to: url)
             print("Successfully saved screenshot to: \(url.path)")
             DispatchQueue.main.async { [weak self] in
                 self?.toast.show(text: "Saved \(url.lastPathComponent)")
                 self?.playShutterSoundIfEnabled()
             }
         } catch {
-            // Log the error for debugging
             print("Save failed: \(error)")
             print("Save directory: \(dir.path)")
             print("Save URL: \(url.path)")
-            
-            // If saving to the preferred location fails, show error message
             DispatchQueue.main.async { [weak self] in
                 self?.toast.show(text: "Save failed: \(error.localizedDescription)")
             }
