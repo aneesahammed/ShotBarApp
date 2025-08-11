@@ -458,38 +458,29 @@ final class ScreenshotManager: ObservableObject {
         
         print("Attempting to save screenshot to: \(url.path)")
         
-        let scale = max(self.lastCapturePixelsPerPoint, 1.0)
-        let logicalSize = NSSize(width: CGFloat(cgImage.width) / scale, height: CGFloat(cgImage.height) / scale)
-        
-        let imageRep = NSBitmapImageRep(cgImage: cgImage)
-        imageRep.size = logicalSize
-        
         do {
+            // Ensure directory exists and is writable
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
             
-            let data: Data?
-            if prefs.imageFormat == .png {
-                // No compression for PNG (lossless anyway, but faster/larger files)
-                data = imageRep.representation(using: .png, properties: [.compressionFactor: 0.0])
-            } else {
-                // Max quality for JPEG
-                data = imageRep.representation(using: .jpeg, properties: [.compressionFactor: 1.0])
-            }
+            let dpi = 72.0 * Double(self.lastCapturePixelsPerPoint)
             
-            guard let data else {
-                throw NSError(domain: "ShotBar", code: -3, userInfo: [NSLocalizedDescriptionKey: "Failed to generate image data"])
+            // Try to save the image
+            switch prefs.imageFormat {
+            case .png: try savePNG(cgImage: cgImage, to: url, dpi: dpi)
+            case .jpg: try saveJPG(cgImage: cgImage, to: url, quality: 1.0, dpi: dpi)
             }
-            
-            try data.write(to: url)
             print("Successfully saved screenshot to: \(url.path)")
             DispatchQueue.main.async { [weak self] in
                 self?.toast.show(text: "Saved \(url.lastPathComponent)")
                 self?.playShutterSoundIfEnabled()
             }
         } catch {
+            // Log the error for debugging
             print("Save failed: \(error)")
             print("Save directory: \(dir.path)")
             print("Save URL: \(url.path)")
+            
+            // If saving to the preferred location fails, show error message
             DispatchQueue.main.async { [weak self] in
                 self?.toast.show(text: "Save failed: \(error.localizedDescription)")
             }
@@ -502,16 +493,19 @@ final class ScreenshotManager: ObservableObject {
         return "Screenshot \(df.string(from: Date())) \(suffix)"
     }
     
-    private func savePNG(cgImage: CGImage, to url: URL) throws {
+    private func savePNG(cgImage: CGImage, to url: URL, dpi: Double) throws {
         let uti = UTType.png.identifier as CFString
         guard let dest = CGImageDestinationCreateWithURL(url as CFURL, uti, 1, nil) else {
             throw NSError(domain: "ShotBar", code: -1, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationCreateWithURL failed"])
         }
         
         // Add image metadata and properties for better quality
-        let props: [CFString: Any] = [
+        var props: [CFString: Any] = [
             kCGImagePropertyPNGCompressionFilter: 0, // No compression filter for best quality
-            kCGImageDestinationEmbedThumbnail: false
+            kCGImageDestinationEmbedThumbnail: false,
+            kCGImagePropertyColorModel: kCGImagePropertyColorModelRGB,
+            kCGImagePropertyDPIWidth: dpi,
+            kCGImagePropertyDPIHeight: dpi
         ]
         CGImageDestinationAddImage(dest, cgImage, props as CFDictionary)
         if !CGImageDestinationFinalize(dest) {
@@ -519,18 +513,20 @@ final class ScreenshotManager: ObservableObject {
         }
     }
     
-    private func saveJPG(cgImage: CGImage, to url: URL, quality: Double) throws {
+    private func saveJPG(cgImage: CGImage, to url: URL, quality: Double, dpi: Double) throws {
         let uti = UTType.jpeg.identifier as CFString
         guard let dest = CGImageDestinationCreateWithURL(url as CFURL, uti, 1, nil) else {
             throw NSError(domain: "ShotBar", code: -1, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationCreateWithURL failed"])
         }
         
         // Enhanced JPEG properties for better quality
-        let props: [CFString: Any] = [
+        var props: [CFString: Any] = [
             kCGImageDestinationLossyCompressionQuality: quality,
             kCGImageDestinationEmbedThumbnail: false,
             kCGImagePropertyColorModel: kCGImagePropertyColorModelRGB,
-            kCGImagePropertyOrientation: 1
+            kCGImagePropertyOrientation: 1,
+            kCGImagePropertyDPIWidth: dpi,
+            kCGImagePropertyDPIHeight: dpi
         ]
         CGImageDestinationAddImage(dest, cgImage, props as CFDictionary)
         if !CGImageDestinationFinalize(dest) {
