@@ -16,7 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "ShotBar")
+            button.image = MenuBarIcon.makeTemplateIcon()
+            button.imagePosition = .imageOnly
             button.action = #selector(togglePopover)
             button.target = self
         }

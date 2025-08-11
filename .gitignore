@@ -1,0 +1,55 @@
+# Xcode
+#
+# Build generated
+build/
+DerivedData/
+
+# User-specific Xcode settings
+xcuserdata/
+
+# Workspace-related files (keep shared data only)
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# Swift Package Manager
+.build/
+Package.resolved
+
+# CocoaPods
+Pods/
+Podfile.lock
+
+# Carthage
+Carthage/Build/
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+
+# iOS/macOS Simulator
+*.simdevicestate
+*.simdevice
+
+# Logs & temp files
+*.log
+*.swp
+*.tmp
+*.DS_Store
+
+# Archives & symbols
+*.xcarchive
+*.dSYM.zip
+*.dSYM
+
+# Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# Swift Playgrounds app (iPad / macOS)
+Documents/Shared Playground Data/
+
+# Environment files
+.env
