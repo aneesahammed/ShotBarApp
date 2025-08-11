@@ -233,22 +233,34 @@ final class ScreenshotManager: ObservableObject {
         let pxPerPtX = displayPixelWidth / screen.frame.width
         let pxPerPtY = displayPixelHeight / screen.frame.height
         
-        // Convert selection from global coordinates to screen-local coordinates
-        var localSelection = selection
-        localSelection.origin.x -= screen.frame.minX
-        localSelection.origin.y -= screen.frame.minY
+        // COORDINATE SYSTEM FIX:
+        // NSScreen coordinates: origin at bottom-left of main screen, Y increases upward
+        // SCDisplay coordinates: origin at top-left of each display, Y increases downward
+        // Selection comes in global NSScreen coordinates, need to convert to display-local pixel coordinates
         
-        // Convert to pixel coordinates - use proper rounding
+        // Step 1: Convert selection from global NSScreen coordinates to this screen's local coordinates
+        // The selection is already in global coordinates from NSEvent.mouseLocation
+        var localSelection = selection
+        localSelection.origin.x -= screen.frame.minX  // Convert to screen-local X
+        
+        // Step 2: Fix Y coordinate conversion - flip from bottom-origin to top-origin
+        // NSScreen Y=0 is at bottom, but we need top-left origin for cropping
+        let screenBottomY = selection.origin.y
+        let screenTopY = screen.frame.height - screenBottomY - selection.height
+        localSelection.origin.y = screenTopY
+        
+        // Step 3: Convert from points to pixels with proper rounding
         let pixelX = Int(round(localSelection.origin.x * pxPerPtX))
+        let pixelY = Int(round(localSelection.origin.y * pxPerPtY))
         let pixelW = Int(round(localSelection.size.width * pxPerPtX))
         let pixelH = Int(round(localSelection.size.height * pxPerPtY))
         
-        // Calculate Y coordinate (SCDisplay uses top-left origin)
-        let pixelYFromTop = Int(round((screen.frame.height - (localSelection.origin.y + localSelection.size.height)) * pxPerPtY))
-        
-        // Ensure minimum size
-        guard pixelW >= 1, pixelH >= 1 else {
-            throw NSError(domain: "ShotBar", code: -11, userInfo: [NSLocalizedDescriptionKey: "Selection too small"])
+        // Ensure minimum size and bounds checking
+        guard pixelW >= 1, pixelH >= 1,
+              pixelX >= 0, pixelY >= 0,
+              pixelX + pixelW <= Int(displayPixelWidth),
+              pixelY + pixelH <= Int(displayPixelHeight) else {
+            throw NSError(domain: "ShotBar", code: -11, userInfo: [NSLocalizedDescriptionKey: "Selection invalid or out of bounds"])
         }
         
         // CRITICAL FIX: Capture the entire display first, then crop
@@ -276,9 +288,8 @@ final class ScreenshotManager: ObservableObject {
         // Capture the full display
         let fullImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
         
-        // Now crop to the selection area
-        let cropY = fullImage.height - pixelYFromTop - pixelH
-        let cropRect = CGRect(x: pixelX, y: cropY, width: pixelW, height: pixelH)
+        // Now crop to the selection area - coordinates are already in top-left origin
+        let cropRect = CGRect(x: pixelX, y: pixelY, width: pixelW, height: pixelH)
         
         guard let croppedImage = fullImage.cropping(to: cropRect) else {
             throw NSError(domain: "ShotBar", code: -12, userInfo: [NSLocalizedDescriptionKey: "Failed to crop image"])
