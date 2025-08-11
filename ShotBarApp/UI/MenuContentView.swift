@@ -50,10 +50,7 @@ struct MenuContentView: View {
             Spacer()
             
             // Settings gear icon
-            Button(action: {
-                // Open the SwiftUI preferences window
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-            }) {
+            SettingsLink {
                 Image(systemName: "gearshape")
                     .font(.title2)
                     .foregroundStyle(.secondary)
@@ -219,9 +216,9 @@ struct MenuContentView: View {
                 .padding(.vertical, 4)
             
             // About menu item
-            menuItem(icon: "info.circle", title: "About ShotBar", shortcut: nil) {
-                NSApp.orderFrontStandardAboutPanel()
-            }
+            //            menuItem(icon: "info.circle", title: "About ShotBar", shortcut: nil) {
+            //                NSApp.orderFrontStandardAboutPanel()
+            //            }
             
             // Quit row
             menuItem(icon: "power", title: "Quit", shortcut: nil) {

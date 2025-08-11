@@ -122,8 +122,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func showPreferences() {
-        // Open the SwiftUI settings window
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        // Open the SwiftUI settings window using the proper method
+        if let settingsWindow = NSApplication.shared.windows.first(where: { $0.title == "ShotBar Settings" }) {
+            settingsWindow.makeKeyAndOrderFront(nil)
+        } else {
+            // Fallback: try to open the settings window
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        }
     }
 }
 
