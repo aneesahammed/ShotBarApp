@@ -1,6 +1,8 @@
 # ShotBarApp
 
-A modern, lightweight macOS screenshot utility built with SwiftUI and ScreenCaptureKit. ShotBarApp provides a clean menu bar interface for capturing screenshots with customizable hotkeys and multiple save options.
+A modern, lightweight macOS screenshot utility built with SwiftUI and ScreenCaptureKit. ShotBarApp provides a clean menu bar interface for capturing screenshots with customizable hotkeys and multiple save options. 
+
+🚧 Please note that this application is entirely vibecoded, built through intuitive development flow.
 
 <div align="center">
 
