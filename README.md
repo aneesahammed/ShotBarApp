@@ -13,6 +13,10 @@ A modern, lightweight macOS screenshot utility built with SwiftUI and ScreenCapt
 
 </div>
 
+## ✨ Screenshot
+<img width="277" height="247" alt="Image" src="https://private-user-images.githubusercontent.com/8899419/476561453-168fc8bb-17bc-4c56-af74-b90e3a44e9da.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NTQ5MTYxNTAsIm5iZiI6MTc1NDkxNTg1MCwicGF0aCI6Ii84ODk5NDE5LzQ3NjU2MTQ1My0xNjhmYzhiYi0xN2JjLTRjNTYtYWY3NC1iOTBlM2E0NGU5ZGEucG5nP1gtQW16LUFsZ29yaXRobT1BV1M0LUhNQUMtU0hBMjU2JlgtQW16LUNyZWRlbnRpYWw9QUtJQVZDT0RZTFNBNTNQUUs0WkElMkYyMDI1MDgxMSUyRnVzLWVhc3QtMSUyRnMzJTJGYXdzNF9yZXF1ZXN0JlgtQW16LURhdGU9MjAyNTA4MTFUMTIzNzMwWiZYLUFtei1FeHBpcmVzPTMwMCZYLUFtei1TaWduYXR1cmU9MzkxZDgzMmVmNjFjNGI1MTA0ZjkzN2MwYTUxYmZjNjlhNTk4MWEyNmM4ZTc5YjdiMmYzMTA5ZGI2NDMwYWUyZCZYLUFtei1TaWduZWRIZWFkZXJzPWhvc3QifQ.oMFeU44d_I5Ee3cUE494EHqg7YbjWrU83pHDrIvoQSE" />
+
+
 ## ✨ Features
 
 ### 📸 Capture Modes
