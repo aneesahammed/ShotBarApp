@@ -1,48 +1,134 @@
 import SwiftUI
 import AppKit
-import Combine
-import Carbon.HIToolbox
-import ScreenCaptureKit
-import CoreGraphics
-import QuartzCore
-import ImageIO
-import UniformTypeIdentifiers
-
-// MARK: - App Services (singletons to simplify wiring)
-
-final class AppServices {
-    static let shared = AppServices()
-    
-    let prefs = Preferences()
-    let hotkeys = HotkeyManager()
-    let shots = ScreenshotManager()
-    
-    private var cs = Set<AnyCancellable>()
-    
-    private init() {
-        // Rebind hotkeys whenever prefs change.
-        prefs.$selectionHotkey.merge(with: prefs.$windowHotkey, prefs.$screenHotkey)
-            .sink { [weak self] _ in self?.rebindHotkeys() }
-            .store(in: &cs)
-        
-        // Initial setup
-        shots.refreshSaveDirectory()
-        rebindHotkeys()
-    }
-    
-    func rebindHotkeys() {
-        hotkeys.unregisterAll()
-        if let hk = prefs.selectionHotkey { hotkeys.register(id: .selection, hotkey: hk) { [weak self] in self?.shots.captureSelection() } }
-        if let hk = prefs.windowHotkey    { hotkeys.register(id: .window,    hotkey: hk) { [weak self] in self?.shots.captureActiveWindow() } }
-        if let hk = prefs.screenHotkey    { hotkeys.register(id: .screen,    hotkey: hk) { [weak self] in self?.shots.captureFullScreens() } }
-    }
-}
 
 // MARK: - AppDelegate to run launch-time setup (Scene has no onAppear)
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var statusItem: NSStatusItem?
+    private var popover: NSPopover?
+    
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = AppServices.shared // touch singletons to init
+        setupMenuBar()
+        setupMainMenu()
+        
+        // Ensure the app shows in dock and has proper icon
+        NSApp.setActivationPolicy(.regular)
+    }
+    
+    private func setupMenuBar() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        
+        if let button = statusItem?.button {
+            button.image = MenuBarIcon.makeTemplateIcon()
+            button.imagePosition = .imageOnly
+            button.action = #selector(togglePopover)
+            button.target = self
+        }
+        
+        popover = NSPopover()
+        popover?.contentSize = NSSize(width: AppConstants.menuMinWidth, height: 300)
+        popover?.behavior = .transient
+        popover?.contentViewController = NSHostingController(
+            rootView: MenuContentView(prefs: AppServices.shared.prefs, shots: AppServices.shared.shots)
+                .frame(minWidth: AppConstants.menuMinWidth)
+                .padding(.vertical, AppConstants.menuPadding)
+        )
+        
+        // Listen for hide notification
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(hidePopover),
+            name: NSNotification.Name("HideMenuBarPopover"),
+            object: nil
+        )
+    }
+    
+    private func setupMainMenu() {
+        let mainMenu = NSMenu()
+        
+        // App menu
+        let appMenu = NSMenu()
+        let appMenuItem = NSMenuItem()
+        appMenuItem.submenu = appMenu
+        
+        // About menu item
+        let aboutItem = NSMenuItem(title: "About ShotBar", action: #selector(showAbout), keyEquivalent: "")
+        aboutItem.target = self
+        appMenu.addItem(aboutItem)
+        
+        appMenu.addItem(NSMenuItem.separator())
+        
+        // Preferences menu item
+        let preferencesItem = NSMenuItem(title: "Preferences...", action: #selector(showPreferences), keyEquivalent: ",")
+        preferencesItem.target = self
+        appMenu.addItem(preferencesItem)
+        
+        appMenu.addItem(NSMenuItem.separator())
+        
+        // Services menu
+        let servicesMenu = NSMenu()
+        let servicesItem = NSMenuItem(title: "Services", action: nil, keyEquivalent: "")
+        servicesItem.submenu = servicesMenu
+        appMenu.addItem(servicesItem)
+        
+        appMenu.addItem(NSMenuItem.separator())
+        
+        // Hide and Quit menu items
+        let hideItem = NSMenuItem(title: "Hide ShotBar", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(hideItem)
+        
+        let hideOthersItem = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthersItem.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(hideOthersItem)
+        
+        let showAllItem = NSMenuItem(title: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(showAllItem)
+        
+        appMenu.addItem(NSMenuItem.separator())
+        
+        let quitItem = NSMenuItem(title: "Quit ShotBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(quitItem)
+        
+        mainMenu.addItem(appMenuItem)
+        
+        // Set the main menu
+        NSApplication.shared.mainMenu = mainMenu
+    }
+    
+    @objc private func togglePopover() {
+        if let popover = popover {
+            if popover.isShown {
+                hidePopover()
+            } else {
+                showPopover()
+            }
+        }
+    }
+    
+    @objc private func showPopover() {
+        if let button = statusItem?.button {
+            popover?.show(relativeTo: button.bounds, of: button, preferredEdge: NSRectEdge.minY)
+        }
+    }
+    
+    @objc private func hidePopover() {
+        popover?.performClose(nil)
+    }
+    
+    @objc private func showAbout() {
+        // Use the standard macOS About panel which will automatically use the AppIcon
+        NSApp.orderFrontStandardAboutPanel()
+    }
+    
+    @objc private func showPreferences() {
+        // Open the SwiftUI settings window using the proper method
+        if let settingsWindow = NSApplication.shared.windows.first(where: { $0.title == "ShotBar Settings" }) {
+            settingsWindow.makeKeyAndOrderFront(nil)
+        } else {
+            // Fallback: try to open the settings window
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        }
     }
 }
 
@@ -51,950 +137,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct ShotBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    private let S = AppServices.shared
     
     var body: some Scene {
-        // Menubar UI
-        MenuBarExtra("ShotBar", systemImage: "camera.viewfinder") {
-            MenuContentView(prefs: S.prefs, shots: S.shots)
-                .frame(minWidth: 360)
-                .padding(.vertical, 6)
-        }
-        .menuBarExtraStyle(.window)
-        
         // Preferences window
         Settings {
-            PreferencesView(prefs: S.prefs, shots: S.shots)
-                .frame(width: 420)
-        }
-    }
-}
-
-// MARK: - Preferences Model
-
-struct Hotkey: Codable, Equatable, Identifiable {
-    var keyCode: UInt32
-    var id: String { "kc-\(keyCode)" }
-    
-    static let allFKeys: [Hotkey] = [
-        Hotkey(keyCode: UInt32(kVK_F1)),  Hotkey(keyCode: UInt32(kVK_F2)),
-        Hotkey(keyCode: UInt32(kVK_F3)),  Hotkey(keyCode: UInt32(kVK_F4)),
-        Hotkey(keyCode: UInt32(kVK_F5)),  Hotkey(keyCode: UInt32(kVK_F6)),
-        Hotkey(keyCode: UInt32(kVK_F7)),  Hotkey(keyCode: UInt32(kVK_F8)),
-        Hotkey(keyCode: UInt32(kVK_F9)),  Hotkey(keyCode: UInt32(kVK_F10)),
-        Hotkey(keyCode: UInt32(kVK_F11)), Hotkey(keyCode: UInt32(kVK_F12)),
-    ]
-    
-    var displayName: String {
-        switch Int(keyCode) {
-        case kVK_F1: return "F1";  case kVK_F2: return "F2";  case kVK_F3: return "F3"
-        case kVK_F4: return "F4";  case kVK_F5: return "F5";  case kVK_F6: return "F6"
-        case kVK_F7: return "F7";  case kVK_F8: return "F8";  case kVK_F9: return "F9"
-        case kVK_F10: return "F10"; case kVK_F11: return "F11"; case kVK_F12: return "F12"
-        default: return "KeyCode \(keyCode)"
-        }
-    }
-}
-
-final class Preferences: ObservableObject {
-    @Published var selectionHotkey: Hotkey? { didSet { save() } }
-    @Published var windowHotkey: Hotkey?    { didSet { save() } }
-    @Published var screenHotkey: Hotkey?    { didSet { save() } }
-    @Published var imageFormat: ImageFormat = .png { didSet { save() } }
-    @Published var destination: Destination = .file { didSet { save() } }
-    @Published var soundEnabled: Bool = true { didSet { save() } }
-    
-    private let defaults = UserDefaults.standard
-    
-    init() {
-        selectionHotkey = load(key: "selectionHotkey") ?? Hotkey(keyCode: UInt32(kVK_F1))
-        windowHotkey    = load(key: "windowHotkey")    ?? Hotkey(keyCode: UInt32(kVK_F2))
-        screenHotkey    = load(key: "screenHotkey")    ?? Hotkey(keyCode: UInt32(kVK_F3))
-        if let raw: String = defaults.string(forKey: "imageFormat"), let f = ImageFormat(rawValue: raw) { imageFormat = f }
-        if let raw: String = defaults.string(forKey: "destination"), let d = Destination(rawValue: raw) { destination = d }
-        if defaults.object(forKey: "soundEnabled") != nil { soundEnabled = defaults.bool(forKey: "soundEnabled") }
-    }
-    
-    private func save() {
-        save(selectionHotkey, key: "selectionHotkey")
-        save(windowHotkey,    key: "windowHotkey")
-        save(screenHotkey,    key: "screenHotkey")
-        defaults.set(imageFormat.rawValue, forKey: "imageFormat")
-        defaults.set(destination.rawValue, forKey: "destination")
-        defaults.set(soundEnabled, forKey: "soundEnabled")
-    }
-    
-    private func save(_ hk: Hotkey?, key: String) {
-        if let hk, let data = try? JSONEncoder().encode(hk) {
-            defaults.set(data, forKey: key)
-        } else {
-            defaults.removeObject(forKey: key)
-        }
-    }
-    
-    private func load(key: String) -> Hotkey? {
-        guard let data = defaults.data(forKey: key) else { return nil }
-        return try? JSONDecoder().decode(Hotkey.self, from: data)
-    }
-}
-
-enum ImageFormat: String, Codable, CaseIterable, Identifiable { case png, jpg; var id: String { rawValue.uppercased() } }
-enum Destination: String, Codable, CaseIterable, Identifiable { case file, clipboard; var id: String { rawValue } }
-
-// MARK: - Preferences UI
-
-struct PreferencesView: View {
-    @ObservedObject var prefs: Preferences
-    @ObservedObject var shots: ScreenshotManager
-    
-    var body: some View {
-        Form {
-            Section("Default Behavior") {
-                HStack {
-                    Text("Format")
-                    Spacer()
-                    Picker("Format", selection: $prefs.imageFormat) {
-                        ForEach(ImageFormat.allCases) { f in Text(f.id) }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 160)
-                }
-                HStack {
-                    Text("Destination")
-                    Spacer()
-                    Picker("Destination", selection: $prefs.destination) {
-                        Text("File").tag(Destination.file)
-                        Text("Clipboard").tag(Destination.clipboard)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 220)
-                }
-                Toggle("Sound", isOn: $prefs.soundEnabled)
-            }
-            Section("Save Location") {
-                HStack {
-                    Text(shots.saveDirectory?.path ?? "Using system screenshot folder")
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                    Spacer()
-                    Button("Reveal") { shots.revealSaveLocationInFinder() }
-                }
-                Text("Honors macOS screenshot location (defaults domain com.apple.screencapture).")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-            
-            Section("Hotkeys (global)") {
-                HotkeyPickerRow(title: "Selection", selection: $prefs.selectionHotkey)
-                HotkeyPickerRow(title: "Active Window", selection: $prefs.windowHotkey)
-                HotkeyPickerRow(title: "Full Screen(s)", selection: $prefs.screenHotkey)
-                Text("Tip: Some keyboards require holding Fn for F-keys unless you enable “Use F1, F2, etc. as standard function keys”.")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-            
-            Section("Permissions") {
-                Button("Check Screen Recording Permission") {
-                    ScreenshotManager.promptForPermissionIfNeeded()
-                }
-                Text("If captures fail, grant Screen & System Audio Recording in System Settings → Privacy & Security.")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-        }
-        .padding()
-    }
-}
-
-// MARK: - Menu UI (menubar popover)
-
-struct MenuContentView: View {
-    @ObservedObject var prefs: Preferences
-    @ObservedObject var shots: ScreenshotManager
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header section
-            headerSection
-            
-            // Format/Destination section
-            formatSection
-            
-            // Main menu section
-            menuSection
-        }
-        .frame(minWidth: 380)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
-    }
-    
-    // Header section with light theme
-    private var headerSection: some View {
-        HStack(alignment: .center, spacing: 12) {
-            // App icon with camera and blue circle background
-            ZStack {
-                Circle()
-                    .fill(.blue)
-                    .frame(width: 32, height: 32)
-                Image(systemName: "camera.viewfinder")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(.white)
-            }
-            
-            VStack(alignment: .leading, spacing: 1) {
-                Text("ShotBar")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.primary)
-                Text("Save to: \(shots.saveDirectory?.lastPathComponent ?? "Documents")/")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            
-            Spacer()
-            
-            // Settings gear icon
-            Image(systemName: "gearshape")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
-        .background(Color(nsColor: .controlBackgroundColor))
-    }
-    
-    // Format and Destination section matching screenshot
-    private var formatSection: some View {
-        VStack(spacing: 12) {
-            // Format row
-            HStack {
-                Text("Format:")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .frame(width: 100, alignment: .leading)
-                
-                // Segmented control style buttons
-                HStack(spacing: 2) {
-                    ForEach(ImageFormat.allCases, id: \.rawValue) { format in
-                        Button(action: { prefs.imageFormat = format }) {
-                            Text(format.id)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(prefs.imageFormat == format ? .white : .primary)
-                                .frame(width: 50, height: 24)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .fill(prefs.imageFormat == format ? .blue : Color(nsColor: .controlBackgroundColor))
-                                )
-                        }
-                        
-                        .buttonStyle(.plain)
-                    }
-                }
-                
-                Spacer()
-                
-                // Keyboard shortcut
-                Text("⌃⇧⌘4")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-            }
-            
-            // Destination row
-            HStack {
-                Text("Destination:")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.primary)
-                    .frame(width: 100, alignment: .leading)
-                
-                // Combined segmented button
-                HStack(spacing: 4) {
-                    ForEach(Destination.allCases, id: \.rawValue) { dest in
-                        Button(action: { prefs.destination = dest }) {
-                            Text(dest.id.capitalized)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(prefs.destination == dest ? .white : .primary)
-                                .frame(width: 80, height: 24)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .fill(prefs.destination == dest ? .blue : Color(nsColor: .controlBackgroundColor))
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                
-                Spacer()
-                
-                // Keyboard shortcut
-                Text("⌃⇧⌘3")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
-        .background(Color(nsColor: .windowBackgroundColor))
-    }
-    
-    // Main menu section with light theme
-    private var menuSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Main action items
-            menuItem(icon: "selection.pin.in.out",
-                     title: actionTitle("Capture Selection"),
-                     shortcut: "⌃⇧⌘4") {
-                shots.captureSelection()
-            }
-            
-            menuItem(icon: "macwindow.on.rectangle",
-                     title: actionTitle("Capture Active Window"),
-                     shortcut: "⌃⇧⌘4") {
-                shots.captureActiveWindow()
-            }
-            
-            menuItem(icon: "display",
-                     title: actionTitle("Capture Full Screen(s)"),
-                     shortcut: "⌃3") {
-                shots.captureFullScreens()
-            }
-            
-            
-            // Divider
-            Rectangle()
-                .fill(Color(nsColor: .separatorColor))
-                .frame(height: 1)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 4)
-            
-            // Reveal folder item
-            menuItem(icon: "folder",
-                     title: "Reveal Save Folder",
-                     shortcut: nil) {
-                shots.revealSaveLocationInFinder()
-            }
-            
-            
-            
-            // Sound toggle
-            HStack {
-                Toggle(isOn: $prefs.soundEnabled) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "speaker.wave.2.fill")
-                            .font(.system(size: 16))
-                            .foregroundStyle(.blue)
-                            .frame(width: 20)
-                        Text("Sound")
-                            .foregroundStyle(.primary)
-                    }
-                }
-                .toggleStyle(.checkbox)
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 6)
-            
-            // Bottom info row removed (no special Control-hold clipboard behavior implemented)
-            // Quit row (Preferences removed)
-            menuItem(icon: "power", title: "Quit", shortcut: nil) {
-                NSApp.terminate(nil)
-            }
-        }
-        .padding(.vertical, 8)
-        .background(Color(nsColor: .windowBackgroundColor))
-        
-    }
-    
-    // Helper function for menu items with light theme
-    private func menuItem(icon: String, title: String, shortcut: String?, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 16))
-                    .foregroundStyle(.blue)
-                    .frame(width: 20)
-                
-                Text(title)
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                
-                if let shortcut = shortcut {
-                    Text(shortcut)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-    
-    private func actionTitle(_ base: String) -> String {
-        switch prefs.destination {
-        case .file: return "\(base) → File"
-        case .clipboard: return "\(base) → Clipboard"
-        }
-    }
-}
-
-struct HotkeyPickerRow: View {
-    let title: String
-    @Binding var selection: Hotkey?
-    
-    var body: some View {
-        HStack {
-            Text(title)
-            Spacer()
-            Picker("", selection: Binding(
-                get: { selection?.id ?? "none" },
-                set: { newID in
-                    if newID == "none" { selection = nil }
-                    else if let hk = Hotkey.allFKeys.first(where: { $0.id == newID }) { selection = hk }
-                })) {
-                    Text("None").tag("none")
-                    ForEach(Hotkey.allFKeys) { hk in
-                        Text(hk.displayName).tag(hk.id)
-                    }
-                }
-                .pickerStyle(.menu)
-                .frame(width: 120)
-        }
-    }
-}
-
-// MARK: - Global hotkeys (Carbon)
-
-enum HotkeyID: UInt32 { case selection = 1, window = 2, screen = 3 }
-
-final class HotkeyManager: ObservableObject {
-    private var eventHandler: EventHandlerRef?
-    private var hotkeyRefs: [HotkeyID: EventHotKeyRef?] = [:]
-    private var callbacks: [HotkeyID: () -> Void] = [:]
-    
-    func register(id: HotkeyID, hotkey: Hotkey, callback: @escaping () -> Void) {
-        callbacks[id] = callback
-        var hotKeyRef: EventHotKeyRef?
-        let hotKeyID = EventHotKeyID(signature: OSType(UInt32(bitPattern: 0x53484B31)), id: id.rawValue) // 'SHK1'
-        let status = RegisterEventHotKey(hotkey.keyCode, 0, hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef)
-        if status == noErr {
-            hotkeyRefs[id] = hotKeyRef
-            installHandlerIfNeeded()
-        } else {
-            print("RegisterEventHotKey failed (\(status)) for \(id)")
-        }
-    }
-    
-    func unregisterAll() {
-        for (_, ref) in hotkeyRefs { if let ref { UnregisterEventHotKey(ref) } }
-        hotkeyRefs.removeAll()
-        callbacks.removeAll()
-        if let handler = eventHandler {
-            RemoveEventHandler(handler)
-            eventHandler = nil
-        }
-    }
-    
-    deinit { unregisterAll() }
-    
-    private func installHandlerIfNeeded() {
-        guard eventHandler == nil else { return }
-        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
-                                      eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { (_, event, userData) -> OSStatus in
-            var hkID = EventHotKeyID()
-            let status = GetEventParameter(event,
-                                           EventParamName(kEventParamDirectObject),
-                                           EventParamType(typeEventHotKeyID),
-                                           nil,
-                                           MemoryLayout<EventHotKeyID>.size,
-                                           nil,
-                                           &hkID)
-            if status == noErr, let userData {
-                let manager = Unmanaged<HotkeyManager>.fromOpaque(userData).takeUnretainedValue()
-                if let id = HotkeyID(rawValue: hkID.id), let cb = manager.callbacks[id] { cb() }
-            }
-            return noErr
-        }, 1, &eventType, UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()), &eventHandler)
-    }
-}
-
-// MARK: - Screenshot Manager (ScreenCaptureKit)
-
-final class ScreenshotManager: ObservableObject {
-    @Published var saveDirectory: URL?
-    private let toast = Toast()
-    private var prefs: Preferences { AppServices.shared.prefs }
-    
-    // MARK: Save location
-    
-    func refreshSaveDirectory() {
-        saveDirectory = macOSScreenshotDirectory() ?? defaultDesktop()
-    }
-    
-    func revealSaveLocationInFinder() {
-        let dir = saveDirectory ?? macOSScreenshotDirectory() ?? defaultDesktop()
-        NSWorkspace.shared.activateFileViewerSelecting([dir])
-    }
-    
-    // MARK: Entry points
-    
-    func captureSelection() {
-        SelectionOverlay.present { [weak self] selection, screen in
-            guard let self, let selection, let screen else { return }
-            Task {
-                do {
-                    let cg = try await self.captureDisplayRegion(selection: selection, on: screen)
-                    self.saveAccordingToPreferences(cgImage: cg, suffix: "Selection")
-                } catch {
-                    DispatchQueue.main.async {
-                        self.toast.show(text: "Selection failed: \(error.localizedDescription)")
-                    }
-                }
-            }
-        }
-    }
-    
-    func captureActiveWindow() {
-        Task {
-            do {
-                guard let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier else {
-                    DispatchQueue.main.async {
-                        self.toast.show(text: "No active app window")
-                    }
-                    return
-                }
-                let content = try await SCShareableContent.current
-                let windows = content.windows.filter { win in
-                    guard let app = win.owningApplication else { return false }
-                    return app.processID == frontPID && win.isOnScreen
-                }
-                guard let target = windows.max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) else {
-                    DispatchQueue.main.async {
-                        self.toast.show(text: "No captureable window")
-                    }
-                    return
-                }
-                let filter = SCContentFilter(desktopIndependentWindow: target)
-                let config = SCStreamConfiguration()
-                // Render at window size in pixels
-                let pxSize = pixelSize(forWindowFrame: target.frame)
-                config.width = pxSize.width
-                config.height = pxSize.height
-                let cg = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-                self.saveAccordingToPreferences(cgImage: cg, suffix: "Window")
-            } catch {
-                DispatchQueue.main.async {
-                    self.toast.show(text: "Window failed: \(error.localizedDescription)")
-                }
-            }
-        }
-    }
-    
-    func captureFullScreens() {
-        Task {
-            do {
-                let content = try await SCShareableContent.current
-                let displays = content.displays
-                if displays.isEmpty {
-                    DispatchQueue.main.async {
-                        self.toast.show(text: "No displays")
-                    }
-                    return
-                }
-                var saved = 0
-                for (i, d) in displays.enumerated() {
-                    let filter = SCContentFilter(display: d, excludingWindows: [])
-                    let config = SCStreamConfiguration()
-                    let px = pixelSize(forDisplay: d)
-                    config.width = px.width
-                    config.height = px.height
-                    let cg = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-                    let suffix = displays.count > 1 ? "Display\(i+1)" : "Screen"
-                    self.saveAccordingToPreferences(cgImage: cg, suffix: suffix)
-                    saved += 1
-                }
-                if saved == 0 {
-                    DispatchQueue.main.async {
-                        self.toast.show(text: "Full screen capture failed")
-                    }
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.toast.show(text: "Full screen failed: \(error.localizedDescription)")
-                }
-            }
-        }
-    }
-    
-    // MARK: SCK helpers
-    
-    private func captureDisplayRegion(selection: CGRect, on screen: NSScreen) async throws -> CGImage {
-        let content = try await SCShareableContent.current
-        
-        // Map NSScreen -> SCDisplay via CGDirectDisplayID
-        guard
-            let num = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
-        else {
-            throw NSError(domain: "ShotBar", code: -10, userInfo: [NSLocalizedDescriptionKey: "No display ID"])
-        }
-        let displayID = CGDirectDisplayID(num.uint32Value)
-        
-        guard let scDisplay = content.displays.first(where: { $0.displayID == displayID }) else {
-            throw NSError(domain: "ShotBar", code: -10, userInfo: [NSLocalizedDescriptionKey: "Display mapping failed"])
-        }
-        
-        // True pixels per point (robust on scaled/Sidecar displays)
-        let pxPerPtX = CGFloat(CGDisplayPixelsWide(displayID))  / screen.frame.width
-        let pxPerPtY = CGFloat(CGDisplayPixelsHigh(displayID)) / screen.frame.height
-        
-        // selection is in GLOBAL points → make it screen-local points
-        var local = selection
-        local.origin.x -= screen.frame.minX
-        local.origin.y -= screen.frame.minY
-        
-        // Convert to display-local PIXELS (origin = TOP-LEFT)
-        let pixelX = Int((local.origin.x * pxPerPtX).rounded(.towardZero))
-        let pixelW = Int((local.size.width * pxPerPtX).rounded(.towardZero))
-        let pixelH = Int((local.size.height * pxPerPtY).rounded(.towardZero))
-        
-        // Y: distance from top to TOP edge of the selection
-        let pixelYFromTop = Int(((screen.frame.height - (local.origin.y + local.size.height)) * pxPerPtY)
-            .rounded(.towardZero))
-        
-        guard pixelW >= 4, pixelH >= 4 else {
-            throw NSError(domain: "ShotBar", code: -11, userInfo: [NSLocalizedDescriptionKey: "Selection too small"])
-        }
-        
-        let filter = SCContentFilter(display: scDisplay, excludingWindows: [])
-        let cfg = SCStreamConfiguration()
-        cfg.sourceRect = CGRect(x: pixelX, y: pixelYFromTop, width: pixelW, height: pixelH)
-        cfg.width  = pixelW
-        cfg.height = pixelH
-        
-        return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
-    }
-    
-    static func promptForPermissionIfNeeded() {
-        // There isn't a dedicated SCK authorization API; touching SCK triggers the system prompt.
-        Task {
-            _ = try? await SCShareableContent.current
-        }
-    }
-    
-    private func pixelSize(forDisplay d: SCDisplay) -> (width: Int, height: Int) {
-        // SCDisplay provides a frame in points; convert using NSScreen matching displayID.
-        if let ns = NSScreen.screens.first(where: {
-            ((($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value) == d.displayID)
-        }) {
-            let s = ns.backingScaleFactor
-            let w = Int((ns.frame.width * s).rounded(.toNearestOrEven))
-            let h = Int((ns.frame.height * s).rounded(.toNearestOrEven))
-            return (w, h)
-        }
-        // Fallback: common 1x assumption (shouldn’t happen on modern macOS)
-        let w = Int(d.frame.width)
-        let h = Int(d.frame.height)
-        return (w, h)
-    }
-    
-    private func pixelSize(forWindowFrame frame: CGRect) -> (width: Int, height: Int) {
-        // Use main screen scale as a reasonable default
-        let s = NSScreen.main?.backingScaleFactor ?? 2.0
-        let w = Int((frame.width * s).rounded(.toNearestOrEven))
-        let h = Int((frame.height * s).rounded(.toNearestOrEven))
-        return (w, h)
-    }
-    
-    // MARK: Saving
-    
-    private func saveAccordingToPreferences(cgImage: CGImage, suffix: String) {
-        switch prefs.destination {
-        case .clipboard:
-            self.saveToClipboard(cgImage: cgImage)
-        case .file:
-            self.save(cgImage: cgImage, suffix: suffix)
-        }
-    }
-    
-    private func saveToClipboard(cgImage: CGImage) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        
-        // Convert CGImage to NSImage for clipboard
-        let size = NSSize(width: cgImage.width, height: cgImage.height)
-        let nsImage = NSImage(cgImage: cgImage, size: size)
-        
-        if pasteboard.writeObjects([nsImage]) {
-            DispatchQueue.main.async { [weak self] in
-                self?.toast.show(text: "Screenshot copied to clipboard")
-                self?.playShutterSoundIfEnabled()
-            }
-        } else {
-            DispatchQueue.main.async { [weak self] in
-                self?.toast.show(text: "Failed to copy to clipboard")
-            }
-        }
-    }
-    
-    private func save(cgImage: CGImage, suffix: String) {
-        let dir = saveDirectory ?? macOSScreenshotDirectory() ?? defaultDesktop()
-        let ext = (prefs.imageFormat == .png) ? "png" : "jpg"
-        let url = dir.appendingPathComponent(filename(suffix: suffix)).appendingPathExtension(ext)
-        
-        do {
-            // Ensure directory exists and is writable
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
-            
-            // Try to save the PNG
-            switch prefs.imageFormat {
-            case .png: try savePNG(cgImage: cgImage, to: url)
-            case .jpg: try saveJPG(cgImage: cgImage, to: url, quality: 0.92)
-            }
-            DispatchQueue.main.async { [weak self] in
-                self?.toast.show(text: "Saved \(url.lastPathComponent)")
-                self?.playShutterSoundIfEnabled()
-            }
-        } catch {
-            // Fallback to Desktop if the preferred location fails
-            let ext = (prefs.imageFormat == .png) ? "png" : "jpg"
-            let fallbackURL = defaultDesktop().appendingPathComponent(filename(suffix: suffix)).appendingPathExtension(ext)
-            do {
-                switch prefs.imageFormat {
-                case .png: try savePNG(cgImage: cgImage, to: fallbackURL)
-                case .jpg: try saveJPG(cgImage: cgImage, to: fallbackURL, quality: 0.92)
-                }
-                DispatchQueue.main.async { [weak self] in
-                    self?.toast.show(text: "Saved to Desktop: \(fallbackURL.lastPathComponent)")
-                    self?.playShutterSoundIfEnabled()
-                }
-            } catch {
-                DispatchQueue.main.async { [weak self] in
-                    self?.toast.show(text: "Save failed: \(error.localizedDescription)")
-                }
-            }
-        }
-    }
-    
-    private func filename(suffix: String) -> String {
-        let df = DateFormatter()
-        df.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
-        return "Screenshot \(df.string(from: Date())) \(suffix)"
-    }
-    
-    private func savePNG(cgImage: CGImage, to url: URL) throws {
-        let uti = UTType.png.identifier as CFString
-        guard let dest = CGImageDestinationCreateWithURL(url as CFURL, uti, 1, nil) else {
-            throw NSError(domain: "ShotBar", code: -1, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationCreateWithURL failed"])
-        }
-        CGImageDestinationAddImage(dest, cgImage, nil)
-        if !CGImageDestinationFinalize(dest) {
-            throw NSError(domain: "ShotBar", code: -2, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationFinalize failed"])
-        }
-    }
-    
-    private func saveJPG(cgImage: CGImage, to url: URL, quality: Double) throws {
-        let uti = UTType.jpeg.identifier as CFString
-        guard let dest = CGImageDestinationCreateWithURL(url as CFURL, uti, 1, nil) else {
-            throw NSError(domain: "ShotBar", code: -1, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationCreateWithURL failed"])
-        }
-        let props: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: quality]
-        CGImageDestinationAddImage(dest, cgImage, props as CFDictionary)
-        if !CGImageDestinationFinalize(dest) {
-            throw NSError(domain: "ShotBar", code: -2, userInfo: [NSLocalizedDescriptionKey: "CGImageDestinationFinalize failed"])
-        }
-    }
-    
-    private func playShutterSoundIfEnabled() {
-        guard AppServices.shared.prefs.soundEnabled else { return }
-        NSSound(named: NSSound.Name("Tink"))?.play()
-    }
-    
-    private func defaultDesktop() -> URL {
-        FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
-    }
-    private func macOSScreenshotDirectory() -> URL? {
-        let domain = "com.apple.screencapture" as CFString
-        if let v = CFPreferencesCopyAppValue("location" as CFString, domain) {
-            if CFGetTypeID(v) == CFStringGetTypeID() {
-                return URL(fileURLWithPath: v as! String, isDirectory: true)
-            } else if CFGetTypeID(v) == CFURLGetTypeID() {
-                return (v as! URL)
-            }
-        }
-        return nil
-    }
-}
-
-// MARK: - Selection overlay (drag rectangle) — returns rect + screen
-
-final class SelectionOverlay: NSWindow, NSWindowDelegate {
-    private var startPoint: CGPoint = .zero
-    private var currentPoint: CGPoint = .zero
-    private var shapeLayer = CAShapeLayer()
-    private var onComplete: ((CGRect?, NSScreen?) -> Void)?
-    
-    private static var activeOverlays: [SelectionOverlay] = []
-    
-    static func present(onComplete: @escaping (CGRect?, NSScreen?) -> Void) {
-        activeOverlays = NSScreen.screens.map { screen in
-            let w = SelectionOverlay(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false, screen: screen)
-            w.onComplete = onComplete
-            return w
-        }
-        activeOverlays.forEach { $0.makeKeyAndOrderFront(nil) }
-        NSCursor.crosshair.set()
-    }
-    
-    convenience init(contentRect: NSRect, styleMask style: NSWindow.StyleMask, backing bufferingType: NSWindow.BackingStoreType, defer flag: Bool, screen: NSScreen) {
-        self.init(contentRect: contentRect, styleMask: style, backing: bufferingType, defer: flag)
-        isOpaque = false
-        backgroundColor = NSColor.black.withAlphaComponent(0.15)
-        ignoresMouseEvents = false
-        acceptsMouseMovedEvents = true
-        level = .screenSaver
-        collectionBehavior = [.transient, .ignoresCycle]
-        delegate = self
-        
-        let v = NSView(frame: contentRect)
-        v.wantsLayer = true
-        v.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.15).cgColor
-        
-        shapeLayer.fillRule = .evenOdd
-        shapeLayer.fillColor = NSColor.black.withAlphaComponent(0.15).cgColor
-        shapeLayer.strokeColor = NSColor.white.withAlphaComponent(0.9).cgColor
-        shapeLayer.lineWidth = 2
-        // Make the selection rectangle use dotted lines
-        shapeLayer.lineDashPattern = [6, 4] // 6 points dash, 4 points gap
-        v.layer?.addSublayer(shapeLayer)
-        
-        contentView = v
-    }
-    
-    override func mouseDown(with event: NSEvent) {
-        startPoint = NSEvent.mouseLocation
-        currentPoint = startPoint
-        updateSelectionPath()
-    }
-    
-    override func mouseDragged(with event: NSEvent) {
-        currentPoint = NSEvent.mouseLocation
-        updateSelectionPath()
-    }
-    
-    override func mouseUp(with event: NSEvent) {
-        currentPoint = NSEvent.mouseLocation
-        let rect = normalizedRect(startPoint: startPoint, endPoint: currentPoint)
-        cleanup(andCompleteWith: rect.width > 4 && rect.height > 4 ? rect : nil)
-    }
-    
-    override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 { // Esc
-            cleanup(andCompleteWith: nil)
-        }
-    }
-    
-    private func updateSelectionPath() {
-        guard let contentView = self.contentView else { return }
-        
-        let rectScreen = normalizedRect(startPoint: startPoint, endPoint: currentPoint)
-        
-        // Convert from SCREEN → WINDOW space, then use view bounds for the outer path
-        let rectWin = self.convertFromScreen(rectScreen)
-        let outer = NSBezierPath(rect: contentView.bounds).cgPath
-        let inner = NSBezierPath(rect: rectWin).cgPath
-        
-        let combined = CGMutablePath()
-        combined.addPath(outer)
-        combined.addPath(inner)
-        shapeLayer.path = combined
-    }
-    
-    private func normalizedRect(startPoint: CGPoint, endPoint: CGPoint) -> CGRect {
-        let x = min(startPoint.x, endPoint.x)
-        let y = min(startPoint.y, endPoint.y)
-        let w = abs(startPoint.x - endPoint.x)
-        let h = abs(startPoint.y - endPoint.y)
-        return CGRect(x: x, y: y, width: w, height: h)
-    }
-    
-    private func cleanup(andCompleteWith rect: CGRect?) {
-        let s = self.screen
-        SelectionOverlay.activeOverlays.forEach { $0.orderOut(nil) }
-        SelectionOverlay.activeOverlays.removeAll()
-        onComplete?(rect, s)
-        onComplete = nil
-    }
-}
-
-private extension NSBezierPath {
-    var cgPath: CGPath {
-        let path = CGMutablePath()
-        var points = [NSPoint](repeating: .zero, count: 3)
-        for i in 0..<elementCount {
-            switch element(at: i, associatedPoints: &points) {
-            case .moveTo: path.move(to: points[0])
-            case .lineTo: path.addLine(to: points[0])
-            case .curveTo: path.addCurve(to: points[2], control1: points[0], control2: points[1])
-            case .closePath: path.closeSubpath()
-            @unknown default: break
-            }
-        }
-        return path
-    }
-}
-
-// MARK: - HUD toast
-
-final class Toast {
-    private var window: NSWindow?
-    
-    func show(text: String, duration: TimeInterval = 1.25) {
-        let label = NSTextField(labelWithString: text)
-        label.textColor = .white
-        label.font = .systemFont(ofSize: 12, weight: .medium)
-        label.lineBreakMode = .byTruncatingMiddle
-        
-        let padding: CGFloat = 14
-        let size = label.intrinsicContentSize
-        let frame = NSRect(x: 0, y: 0, width: size.width + padding*2, height: size.height + padding)
-        let win = NSWindow(contentRect: frame, styleMask: .borderless, backing: .buffered, defer: false)
-        win.isOpaque = false
-        win.backgroundColor = .clear
-        win.level = .statusBar
-        win.hasShadow = true
-        win.ignoresMouseEvents = true
-        win.collectionBehavior = [.transient, .ignoresCycle]
-        
-        let bg = NSVisualEffectView(frame: frame)
-        bg.material = .hudWindow
-        bg.blendingMode = .withinWindow
-        bg.state = .active
-        bg.wantsLayer = true
-        bg.layer?.cornerRadius = 10
-        
-        label.frame = NSRect(x: padding, y: (frame.height - size.height)/2 - 1, width: size.width, height: size.height)
-        bg.addSubview(label)
-        win.contentView = bg
-        
-        if let screen = NSScreen.main {
-            let origin = CGPoint(x: screen.frame.maxX - frame.width - 20, y: screen.frame.maxY - frame.height - 36)
-            win.setFrameOrigin(origin)
-        }
-        
-        win.alphaValue = 0
-        win.makeKeyAndOrderFront(nil)
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.12
-            win.animator().alphaValue = 1
-        }
-        
-        self.window = win
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
-            guard let self, let win = self.window else { return }
-            NSAnimationContext.runAnimationGroup({ ctx in
-                ctx.duration = 0.2
-                win.animator().alphaValue = 0
-            }, completionHandler: {
-                win.orderOut(nil)
-                self.window = nil
-            })
+            PreferencesView(prefs: AppServices.shared.prefs, shots: AppServices.shared.shots)
+                .frame(width: AppConstants.preferencesWidth)
         }
     }
 }
