@@ -1,787 +1,359 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ShotBar — Screenshot without finger gymnastics</title>
-    <meta
-      name="description"
-      content="ShotBar is a modern, lightweight macOS screenshot utility for selection, window, and full-screen capture. Menu bar app. Custom hotkeys. PNG/JPEG. macOS 15.5+."
-    />
-    <meta
-      name="theme-color"
-      content="#0A84FF"
-      media="(prefers-color-scheme: light)"
-    />
-    <meta
-      name="theme-color"
-      content="#0A84FF"
-      media="(prefers-color-scheme: dark)"
-    />
-
-    <!-- Open Graph -->
-    <meta property="og:type" content="website" />
-    <meta
-      property="og:title"
-      content="ShotBar — Screenshot without finger gymnastics"
-    />
-    <meta
-      property="og:description"
-      content="A clean macOS menu bar screenshot tool with custom hotkeys and crisp Retina output."
-    />
-    <meta property="og:url" content="https://shotbar.example.com/" />
-    <!-- TODO: replace with hosted image URL -->
-    <meta
-      property="og:image"
-      content="https://raw.githubusercontent.com/user-attachments/assets/071e3be1-ee02-4ac8-b8f0-e2057357b0f3"
-    />
-
-    <!-- Twitter -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta
-      name="twitter:title"
-      content="ShotBar — Screenshot without finger gymnastics"
-    />
-    <meta
-      name="twitter:description"
-      content="A clean macOS menu bar screenshot tool with custom hotkeys and crisp Retina output."
-    />
-
-    <!-- Favicon (inline SVG, no network request) -->
-    <link
-      rel="icon"
-      type="image/svg+xml"
-      href='data:image/svg+xml;utf8,
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-      <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="%230A84FF"/><stop offset="1" stop-color="%233A7AFE"/>
-      </linearGradient></defs>
-      <rect rx="14" ry="14" width="64" height="64" fill="url(%23g)"/>
-      <g fill="white">
-        <rect x="12" y="22" width="40" height="26" rx="6"/>
-        <circle cx="48" cy="28" r="3"/>
-        <circle cx="32" cy="35" r="9"/>
-      </g>
-    </svg>'
-    />
-
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ShotBar</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-      :root {
-        --bg: #0b0c0f;
-        --panel: #0f1116;
-        --text: #e6e6e6;
-        --muted: #a1a1aa;
-        --brand: #0a84ff; /* iOS blue */
-        --brand-2: #3a7afe;
-        --ok: #16a34a;
-        --shadow: 0 10px 30px rgba(10, 132, 255, 0.18);
-        --radius: 16px;
-        --ring: 0 0 0 2px rgba(10, 132, 255, 0.35);
-        --maxw: 1200px;
-      }
-      @media (prefers-color-scheme: light) {
-        :root {
-          --bg: #f7f7fb;
-          --panel: #ffffff;
-          --text: #0f1222;
-          --muted: #4b5563;
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
         }
       }
-
-      * {
-        box-sizing: border-box;
-      }
-      html,
-      body {
-        height: 100%;
-      }
-      body {
-        margin: 0;
-        font: 16px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text",
-          Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
-          "Segoe UI Emoji";
-        color: var(--text);
-        background: radial-gradient(
-            1200px 600px at 10% -10%,
-            rgba(10, 132, 255, 0.2),
-            transparent 60%
-          ),
-          radial-gradient(
-            800px 400px at 90% -20%,
-            rgba(58, 122, 254, 0.18),
-            transparent 60%
-          ),
-          var(--bg);
-        -webkit-font-smoothing: antialiased;
-        text-rendering: optimizeLegibility;
-      }
-
-      a {
-        color: var(--brand);
-        text-decoration: none;
-      }
-      a:hover {
-        text-decoration: underline;
-      }
-
-      .container {
-        width: 100%;
-        max-width: var(--maxw);
-        margin: 0 auto;
-        padding: 0 24px;
-      }
-
-      .btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-        border: 1px solid transparent;
-        padding: 12px 16px;
-        border-radius: 12px;
-        font-weight: 600;
-        letter-spacing: 0.2px;
-        backdrop-filter: saturate(180%) blur(8px);
-        transition: transform 0.14s ease, box-shadow 0.14s ease,
-          background 0.14s ease;
-      }
-      .btn.primary {
-        background: linear-gradient(180deg, var(--brand), var(--brand-2));
-        color: white;
-        box-shadow: var(--shadow);
-      }
-      .btn.primary:hover {
-        transform: translateY(-1px);
-      }
-      .btn.ghost {
-        background: rgba(255, 255, 255, 0.04);
-        border-color: rgba(255, 255, 255, 0.08);
-      }
-      .btn.ghost:hover {
-        box-shadow: var(--ring);
-      }
-      .btn.small {
-        padding: 8px 12px;
-        border-radius: 10px;
-        font-weight: 600;
-      }
-
-      header {
-        position: sticky;
-        top: 0;
-        z-index: 50;
-        backdrop-filter: blur(10px) saturate(140%);
-        background: color-mix(in oklab, var(--bg) 82%, transparent);
-        border-bottom: 1px solid
-          color-mix(in oklab, var(--text) 12%, transparent);
-      }
-      .nav {
-        display: grid;
-        grid-template-columns: 1fr auto 1fr;
-        align-items: center;
-        height: 64px;
-      }
-      .brand {
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-        font-weight: 800;
-      }
-      .brand .logo {
-        width: 28px;
-        height: 28px;
-        border-radius: 8px;
-        background: linear-gradient(135deg, var(--brand), var(--brand-2));
-        display: grid;
-        place-items: center;
-        color: #fff;
-        box-shadow: var(--shadow);
-      }
-      .menu {
-        display: none;
-        gap: 18px;
-        align-items: center;
-      }
-      .right {
-        display: flex;
-        gap: 10px;
-        justify-content: end;
-      }
-      @media (min-width: 880px) {
-        .menu {
-          display: flex;
-        }
-      }
-
-      .hero {
-        padding: 72px 0 48px;
-      }
-      .hero .wrap {
-        display: grid;
-        gap: 32px;
-        align-items: center;
-      }
-      @media (min-width: 980px) {
-        .hero .wrap {
-          grid-template-columns: 1.1fr 0.9fr;
-        }
-      }
-      h1 {
-        font-size: clamp(36px, 7vw, 64px);
-        letter-spacing: -0.5px;
-        margin: 0 0 12px;
-      }
-      .sub {
-        font-size: clamp(16px, 2.2vw, 20px);
-        color: var(--muted);
-        margin-bottom: 28px;
-      }
-      .hero .cta {
-        display: flex;
-        gap: 12px;
-        flex-wrap: wrap;
-      }
-
-      .card {
-        background: color-mix(in oklab, var(--panel) 95%, transparent);
-        border: 1px solid color-mix(in oklab, var(--text) 10%, transparent);
-        border-radius: var(--radius);
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2),
-          inset 0 1px 0 rgba(255, 255, 255, 0.04);
-      }
-      .screenshot {
-        position: relative;
-        padding: 10px;
-        border-radius: calc(var(--radius) + 2px);
-      }
-      .screenshot img {
-        width: 100%;
-        height: auto;
-        display: block;
-        border-radius: 12px;
-      }
-      .screenshot .glow {
-        position: absolute;
-        inset: 0;
-        border-radius: inherit;
-        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06),
-          0 0 120px 20px rgba(10, 132, 255, 0.15) inset;
-        pointer-events: none;
-      }
-
-      .badgebar {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-        margin-top: 18px;
-      }
-      .badge {
-        font-size: 12px;
-        padding: 6px 10px;
-        border-radius: 999px;
-        border: 1px solid color-mix(in oklab, var(--text) 14%, transparent);
-        color: var(--muted);
-        background: color-mix(in oklab, var(--panel) 94%, transparent);
-      }
-
-      section {
-        padding: 56px 0;
-      }
-      .grid {
-        display: grid;
-        gap: 16px;
-      }
-      @media (min-width: 880px) {
-        .grid.cols-3 {
-          grid-template-columns: repeat(3, 1fr);
-        }
-      }
-      @media (min-width: 880px) {
-        .grid.cols-2 {
-          grid-template-columns: repeat(2, 1fr);
-        }
-      }
-
-      .feature {
-        padding: 18px;
-        border-radius: 14px;
-        border: 1px solid color-mix(in oklab, var(--text) 10%, transparent);
-        background: color-mix(in oklab, var(--panel) 94%, transparent);
-      }
-      .feature h3 {
-        margin: 8px 0 8px;
-        font-size: 18px;
-      }
-      .feature p {
-        margin: 0;
-        color: var(--muted);
-      }
-      .icon {
-        width: 28px;
-        height: 28px;
-        border-radius: 8px;
-        display: grid;
-        place-items: center;
-        background: linear-gradient(
-          180deg,
-          color-mix(in oklab, var(--brand) 90%, white),
-          var(--brand-2)
-        );
-        color: white;
-        box-shadow: var(--shadow);
-      }
-
-      .kbd {
-        font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        background: color-mix(in oklab, var(--panel) 80%, transparent);
-        border: 1px solid color-mix(in oklab, var(--text) 12%, transparent);
-        padding: 3px 7px;
-        border-radius: 8px;
-      }
-
-      pre {
-        margin: 0;
-        padding: 16px;
-        background: #0b1020;
-        color: #d7e3ff;
-        border: 1px solid #1c2442;
-        border-radius: 12px;
-        overflow: auto;
-      }
-      code {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      }
-
-      .cta-band {
-        margin-top: 8px;
-        padding: 24px;
-        display: grid;
-        gap: 14px;
-        align-items: center;
-      }
-      @media (min-width: 880px) {
-        .cta-band {
-          grid-template-columns: 1fr auto;
-        }
-      }
-
-      details {
-        border: 1px solid color-mix(in oklab, var(--text) 12%, transparent);
-        background: color-mix(in oklab, var(--panel) 94%, transparent);
-        border-radius: 12px;
-        padding: 14px 16px;
-      }
-      summary {
-        cursor: pointer;
-        font-weight: 700;
-      }
-      details p {
-        color: var(--muted);
-      }
-
-      footer {
-        padding: 36px 0;
-        color: var(--muted);
-      }
-      .footgrid {
-        display: grid;
-        gap: 16px;
-        align-items: center;
-      }
-      @media (min-width: 880px) {
-        .footgrid {
-          grid-template-columns: 1fr auto;
-        }
-      }
-
-      .pill {
-        display: inline-flex;
-        gap: 8px;
-        align-items: center;
-        padding: 6px 10px;
-        border-radius: 9999px;
-        border: 1px solid color-mix(in oklab, var(--text) 12%, transparent);
-        color: var(--muted);
-      }
-
-      /* tiny animations */
-      .reveal {
-        opacity: 0;
-        transform: translateY(8px);
-        transition: opacity 0.5s ease, transform 0.6s ease;
-      }
-      .reveal.revealed {
-        opacity: 1;
-        transform: translateY(0);
+      .animate-fade-in {
+        animation: fadeIn 0.8s ease-out forwards;
       }
     </style>
   </head>
-  <body>
-    <header>
-      <div class="container nav">
-        <div class="brand">
-          <span class="logo" aria-hidden="true">📷</span>
-          <span>ShotBar</span>
+  <body class="bg-gray-50 text-gray-900 antialiased">
+    <!-- Header -->
+    <header class="bg-white shadow-sm sticky top-0 z-10">
+      <div
+        class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between"
+      >
+        <div class="flex items-center space-x-2">
+          <span class="text-2xl">📷</span>
+          <h1 class="text-xl font-bold">ShotBar</h1>
         </div>
-        <nav class="menu" aria-label="Primary">
-          <a href="#features">Features</a>
-          <a href="#shortcuts">Shortcuts</a>
-          <a href="#tech">Tech</a>
-          <a href="#faq">FAQ</a>
+        <nav class="hidden md:flex space-x-6">
+          <a href="#features" class="text-gray-600 hover:text-black transition"
+            >Features</a
+          >
+          <a href="#shortcuts" class="text-gray-600 hover:text-black transition"
+            >Shortcuts</a
+          >
+          <a href="#tech" class="text-gray-600 hover:text-black transition"
+            >Tech</a
+          >
+          <a href="#faq" class="text-gray-600 hover:text-black transition"
+            >FAQ</a
+          >
         </nav>
-        <div class="right">
-          <!-- TODO: replace href with your Releases DMG -->
+        <div class="flex space-x-4">
           <a
-            class="btn small primary"
             href="#download"
-            onclick="document.getElementById('download').scrollIntoView({behavior:'smooth'})"
+            class="px-4 py-2 bg-black text-white rounded-md hover:bg-black/90 transition duration-300 ease-in-out"
             >Download</a
           >
-          <!-- TODO: replace with your repo URL -->
           <a
-            class="btn small ghost"
             href="https://github.com/aneesahammed/ShotBarApp"
-            target="_blank"
-            rel="noopener"
+            class="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-100 transition duration-300 ease-in-out"
             >GitHub</a
           >
         </div>
       </div>
     </header>
 
-    <main>
-      <section class="hero">
-        <div class="container wrap">
-          <div>
-            <h1 class="reveal">Screenshots without finger gymnastics</h1>
-            <p class="sub reveal">
-              ShotBar is a clean macOS <strong>menu bar</strong> app for
-              screenshots. One-tap capture. Custom
-              <span class="kbd">F1–F3</span> hotkeys. Crisp Retina output. No
-              clutter.
+    <!-- Hero Section -->
+    <section class="py-20 bg-white">
+      <div
+        class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center animate-fade-in"
+      >
+        <h2 class="text-4xl md:text-5xl font-bold mb-6">
+          Screenshots without finger gymnastics
+        </h2>
+        <p class="text-lg md:text-xl mb-8 text-gray-600">
+          ShotBar is a clean macOS menu bar app for screenshots. One-tap
+          capture. Custom F1–F3 hotkeys. Crisp Retina output. No clutter.
+        </p>
+        <div
+          class="flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4 mb-8"
+        >
+          <a
+            href="#download"
+            class="px-6 py-3 bg-black text-white rounded-md hover:bg-black/90 transition duration-300 ease-in-out"
+            >⬇️ Download for macOS 15.5+</a
+          >
+          <a
+            href="https://github.com/aneesahammed/ShotBarApp"
+            class="px-6 py-3 border border-gray-300 rounded-md hover:bg-gray-100 transition duration-300 ease-in-out"
+            >Build from source</a
+          >
+        </div>
+        <div
+          class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-500"
+        >
+          <div>macOS 15.5+</div>
+          <div>Swift 5.9+</div>
+          <div>ScreenCaptureKit</div>
+          <div>MIT License</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="py-20 bg-gray-50">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div
+            class="p-6 bg-white rounded-lg shadow-md hover:shadow-lg transition duration-300 ease-in-out animate-fade-in"
+            style="animation-delay: 0.1s"
+          >
+            <span class="text-4xl mb-4 block">🎯</span>
+            <h3 class="text-xl font-semibold mb-2">Three capture modes</h3>
+            <p class="text-gray-600">
+              Selection drag, active window, or full screen(s). Optimized for
+              multi‑display setups.
             </p>
-            <div class="cta reveal cta">
-              <!-- TODO: update DMG link -->
-              <a
-                class="btn primary"
-                href="https://github.com/aneesahammed/ShotBarApp/releases"
-                >⬇️ Download for macOS 15.5+</a
-              >
-              <a class="btn ghost" href="#build">Build from source</a>
-            </div>
-            <div class="badgebar reveal" aria-label="Compatibility badges">
-              <span class="badge">macOS 15.5+</span>
-              <span class="badge">Swift 5.9+</span>
-              <span class="badge">ScreenCaptureKit</span>
-              <span class="badge">MIT License</span>
-            </div>
           </div>
-          <div class="screenshot card reveal" aria-label="App screenshot">
-            <!-- TODO: replace src with your hosted screenshot image to avoid GitHub rate limits -->
-            <img
-              loading="lazy"
-              src="https://github.com/user-attachments/assets/071e3be1-ee02-4ac8-b8f0-e2057357b0f3"
-              alt="ShotBar menu with capture options"
-            />
-            <div class="glow" aria-hidden="true"></div>
+          <div
+            class="p-6 bg-white rounded-lg shadow-md hover:shadow-lg transition duration-300 ease-in-out animate-fade-in"
+            style="animation-delay: 0.2s"
+          >
+            <span class="text-4xl mb-4 block">⚡</span>
+            <h3 class="text-xl font-semibold mb-2">F‑key hotkeys</h3>
+            <p class="text-gray-600">
+              Assign F1, F2, F3 to modes you use most. No more ⌃⇧⌘ finger yoga.
+            </p>
           </div>
-        </div>
-      </section>
-
-      <section id="features">
-        <div class="container">
-          <div class="grid cols-3">
-            <div class="feature reveal">
-              <div class="icon">🎯</div>
-              <h3>Three capture modes</h3>
-              <p>
-                Selection drag, active window, or full screen(s). Optimized for
-                multi‑display setups.
-              </p>
-            </div>
-            <div class="feature reveal">
-              <div class="icon">⚡</div>
-              <h3>F‑key hotkeys</h3>
-              <p>
-                Assign <span class="kbd">F1</span>, <span class="kbd">F2</span>,
-                <span class="kbd">F3</span> to modes you use most. No more ⌃⇧⌘
-                finger yoga.
-              </p>
-            </div>
-            <div class="feature reveal">
-              <div class="icon">💾</div>
-              <h3>Save how you like</h3>
-              <p>
-                Clipboard or files, PNG (lossless) or JPEG (HQ). Smart
-                timestamped filenames.
-              </p>
-            </div>
-            <div class="feature reveal">
-              <div class="icon">🖥️</div>
-              <h3>Retina‑crisp output</h3>
-              <p>
-                Correct coordinate mapping across scaled and multiple displays.
-                Looks sharp everywhere.
-              </p>
-            </div>
-            <div class="feature reveal">
-              <div class="icon">🔒</div>
-              <h3>Privacy‑friendly</h3>
-              <p>
-                App‑sandboxed. Requires only Screen Recording permission. No
-                accessibility access, no data collection.
-              </p>
-            </div>
-            <div class="feature reveal">
-              <div class="icon">🔔</div>
-              <h3>Instant feedback</h3>
-              <p>
-                Lightweight HUD to confirm your capture and optional shutter
-                sound so you never miss a shot.
-              </p>
-            </div>
+          <div
+            class="p-6 bg-white rounded-lg shadow-md hover:shadow-lg transition duration-300 ease-in-out animate-fade-in"
+            style="animation-delay: 0.3s"
+          >
+            <span class="text-4xl mb-4 block">💾</span>
+            <h3 class="text-xl font-semibold mb-2">Save how you like</h3>
+            <p class="text-gray-600">
+              Clipboard or files, PNG (lossless) or JPEG (HQ). Smart timestamped
+              filenames.
+            </p>
+          </div>
+          <div
+            class="p-6 bg-white rounded-lg shadow-md hover:shadow-lg transition duration-300 ease-in-out animate-fade-in"
+            style="animation-delay: 0.4s"
+          >
+            <span class="text-4xl mb-4 block">🖥️</span>
+            <h3 class="text-xl font-semibold mb-2">Retina‑crisp output</h3>
+            <p class="text-gray-600">
+              Correct coordinate mapping across scaled and multiple displays.
+              Looks sharp everywhere.
+            </p>
+          </div>
+          <div
+            class="p-6 bg-white rounded-lg shadow-md hover:shadow-lg transition duration-300 ease-in-out animate-fade-in"
+            style="animation-delay: 0.5s"
+          >
+            <span class="text-4xl mb-4 block">🔒</span>
+            <h3 class="text-xl font-semibold mb-2">Privacy‑friendly</h3>
+            <p class="text-gray-600">
+              App‑sandboxed. Requires only Screen Recording permission. No
+              accessibility access, no data collection.
+            </p>
+          </div>
+          <div
+            class="p-6 bg-white rounded-lg shadow-md hover:shadow-lg transition duration-300 ease-in-out animate-fade-in"
+            style="animation-delay: 0.6s"
+          >
+            <span class="text-4xl mb-4 block">🔔</span>
+            <h3 class="text-xl font-semibold mb-2">Instant feedback</h3>
+            <p class="text-gray-600">
+              Lightweight HUD to confirm your capture and optional shutter sound
+              so you never miss a shot.
+            </p>
           </div>
         </div>
-      </section>
+      </div>
+    </section>
 
-      <section id="shortcuts">
-        <div class="container">
-          <div class="card cta-band reveal">
-            <div>
-              <h2>Built for speed</h2>
-              <p class="sub">
-                Default shortcuts that just make sense — and you can change them
-                anytime in Preferences.
-              </p>
-              <div class="badgebar">
-                <span class="pill"
-                  ><span class="kbd">F1</span> Selection capture</span
-                >
-                <span class="pill"
-                  ><span class="kbd">F2</span> Active window</span
-                >
-                <span class="pill"
-                  ><span class="kbd">F3</span> Full screen</span
-                >
-              </div>
-            </div>
-            <div>
-              <a class="btn primary" href="#download">Get ShotBar</a>
-            </div>
-          </div>
-        </div>
-      </section>
+    <!-- Shortcuts Section -->
+    <section id="shortcuts" class="py-20 bg-white">
+      <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 animate-fade-in">
+        <h2 class="text-3xl font-bold mb-6">Built for speed</h2>
+        <p class="text-lg mb-8 text-gray-600">
+          Default shortcuts that just make sense — and you can change them
+          anytime in Preferences.
+        </p>
+        <!-- <div class="mb-8 p-6 bg-gray-50 rounded-lg">
+          <p class="mb-2">F1 Selection capture</p>
+          <p class="mb-2">F2 Active window</p>
+          <p>F3 Full screen</p>
+        </div> -->
+        <a
+          href="#download"
+          class="px-6 py-3 bg-black text-white rounded-md hover:bg-black/90 transition duration-300 ease-in-out"
+          >Get ShotBar</a
+        >
+      </div>
+    </section>
 
-      <section id="tech">
-        <div class="container">
-          <h2 class="reveal">Modern, minimal, maintainable</h2>
-          <p class="sub reveal">
-            SwiftUI UI. ScreenCaptureKit for capture. Combine for state. Clean
-            services + models architecture.
-          </p>
-          <div class="grid cols-2">
-            <div class="feature reveal">
-              <h3>Architecture</h3>
-              <p>
-                Clear separation of concerns: <strong>Models</strong>,
-                <strong>Services</strong>, <strong>UI</strong>, and
-                <strong>Components</strong>. Hotkeys and capture are injectable
-                services coordinated by <code>AppServices</code>.
-              </p>
-              <pre><code>ShotBarApp/
+    <!-- Tech Section -->
+    <section id="tech" class="py-20 bg-gray-50">
+      <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+        <h2 class="text-3xl font-bold mb-6 animate-fade-in">
+          Modern, minimal, maintainable
+        </h2>
+        <p
+          class="text-lg mb-8 text-gray-600 animate-fade-in"
+          style="animation-delay: 0.1s"
+        >
+          SwiftUI UI. ScreenCaptureKit for capture. Combine for state. Clean
+          services + models architecture.
+        </p>
+        <div class="grid md:grid-cols-2 gap-8">
+          <div class="animate-fade-in" style="animation-delay: 0.2s">
+            <h3 class="text-xl font-semibold mb-4">Architecture</h3>
+            <p class="text-gray-600 mb-4">
+              Clear separation of concerns: Models, Services, UI, and
+              Components. Hotkeys and capture are injectable services
+              coordinated by AppServices.
+            </p>
+            <pre class="bg-gray-100 p-4 rounded-md text-sm overflow-auto">
+ShotBarApp/
 ├─ Models/            # Preferences, Hotkey, Enums
 ├─ Services/          # HotkeyManager, ScreenshotManager
 ├─ UI/                # Menu & Preferences (SwiftUI)
 └─ Components/        # Selection overlay, Toast
-</code></pre>
-            </div>
-            <div class="feature reveal">
-              <h3>Why it’s reliable</h3>
-              <ul>
-                <li>
-                  Uses <strong>ScreenCaptureKit</strong> for crisp, future‑proof
-                  capture
-                </li>
-                <li>Hotkeys with stable Carbon Event Manager</li>
-                <li>Graceful fallbacks and error handling</li>
-                <li>Retina + multi‑display correctness</li>
-              </ul>
-            </div>
+                    </pre
+            >
+          </div>
+          <div class="animate-fade-in" style="animation-delay: 0.3s">
+            <h3 class="text-xl font-semibold mb-4">Why it’s reliable</h3>
+            <ul class="list-disc pl-6 space-y-2 text-gray-600">
+              <li>Uses ScreenCaptureKit for crisp, future‑proof capture</li>
+              <li>Hotkeys with stable Carbon Event Manager</li>
+              <li>Graceful fallbacks and error handling</li>
+              <li>Retina + multi‑display correctness</li>
+            </ul>
           </div>
         </div>
-      </section>
+      </div>
+    </section>
 
-      <section id="download">
-        <div class="container">
-          <div class="card cta-band reveal">
-            <div>
-              <h2>Download & install</h2>
-              <p class="sub">
-                Runs on macOS 15.5 or later. Unsigned for now — right‑click the
-                app and choose <em>Open</em> the first time.
-              </p>
-              <div
-                style="
-                  display: flex;
-                  flex-wrap: wrap;
-                  gap: 12px;
-                  margin-top: 8px;
-                "
-              >
-                <!-- TODO: replace with your real DMG link -->
-                <a
-                  class="btn primary"
-                  href="https://github.com/aneesahammed/ShotBarApp/releases/latest"
-                  target="_blank"
-                  rel="noopener"
-                  >Download .dmg</a
-                >
-                <a class="btn ghost" href="#build">Build from source</a>
-                <!-- TODO: change tip link -->
-                <a
-                  class="btn ghost"
-                  href="https://buymeacoffee.com/yourname"
-                  target="_blank"
-                  rel="noopener"
-                  >☕ Tip jar</a
-                >
-              </div>
-            </div>
-            <div>
-              <div class="feature" id="build">
-                <strong>Build from source</strong>
-                <pre><code>git clone https://github.com/aneesahammed/ShotBarApp.git
-cd ShotBarApp
-xcodebuild -scheme ShotBarApp -configuration Release build</code></pre>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="faq">
-        <div class="container">
-          <h2 class="reveal">FAQ & troubleshooting</h2>
-          <div class="grid">
-            <details class="reveal">
-              <summary>App won’t open</summary>
-              <p>
-                Right‑click the app in Applications → <strong>Open</strong> →
-                <strong>Open</strong> (unsigned first run).
-              </p>
-            </details>
-            <details class="reveal">
-              <summary>No screenshots are captured</summary>
-              <p>
-                Grant <strong>Screen Recording</strong> permission: System
-                Settings → Privacy &amp; Security → Screen Recording.
-              </p>
-            </details>
-            <details class="reveal">
-              <summary>Function keys don’t trigger</summary>
-              <p>
-                System Settings → Keyboard → enable “Use F1, F2, etc. keys as
-                standard function keys”.
-              </p>
-            </details>
-            <details class="reveal">
-              <summary>Blurry output?</summary>
-              <p>
-                ShotBar captures at native resolution. Check display scaling
-                settings if output appears soft.
-              </p>
-            </details>
-          </div>
-        </div>
-      </section>
-
-      <section>
-        <div class="container">
-          <div class="card cta-band reveal">
-            <div>
-              <h2>Open‑source & MIT licensed</h2>
-              <p class="sub">
-                Contributions welcome — new capture modes, formats,
-                accessibility, and performance work.
-              </p>
-            </div>
-            <div>
-              <!-- TODO: replace with discussions link -->
-              <a
-                class="btn ghost"
-                href="https://github.com/aneesahammed/ShotBarApp/discussions"
-                target="_blank"
-                rel="noopener"
-                >Join discussions →</a
-              >
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
-
-    <footer>
-      <div class="container footgrid">
-        <div>
-          Made with ❤️ for the macOS community •
+    <!-- Download Section -->
+    <section id="download" class="py-20 bg-white">
+      <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 animate-fade-in">
+        <h2 class="text-3xl font-bold mb-6">Download & install</h2>
+        <p class="text-lg mb-8 text-gray-600">
+          Runs on macOS 15.5 or later. Unsigned for now — right‑click the app
+          and choose Open the first time.
+        </p>
+        <div
+          class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4 mb-8"
+        >
           <a
-            href="https://github.com/aneesahammed/ShotBarApp/blob/main/LICENSE"
-            target="_blank"
-            rel="noopener"
-            >MIT</a
+            href="https://github.com/aneesahammed/ShotBarApp/releases"
+            class="px-6 py-3 bg-black text-white rounded-md hover:bg-black/90 transition duration-300 ease-in-out"
+            >Download .dmg</a
           >
+          <a
+            href="https://github.com/aneesahammed/ShotBarApp"
+            class="px-6 py-3 border border-gray-300 rounded-md hover:bg-gray-100 transition duration-300 ease-in-out"
+            >Build from source</a
+          >
+          <a
+            href="https://buymeacoffee.com/4zyodcewl"
+            class="px-6 py-3 bg-yellow-400 text-black rounded-md hover:bg-yellow-300 transition duration-300 ease-in-out flex items-center justify-center"
+          >
+            <span class="mr-2">☕</span> Buy Me a Coffee
+          </a>
         </div>
-        <div style="display: flex; gap: 10px">
-          <!-- TODO: replace links -->
+        <pre class="bg-gray-100 p-4 rounded-md text-sm overflow-auto">
+git clone https://github.com/aneesahammed/ShotBarApp.git
+cd ShotBarApp
+xcodebuild -scheme ShotBarApp -configuration Release build
+            </pre
+        >
+      </div>
+    </section>
+
+    <!-- FAQ Section -->
+    <section id="faq" class="py-20 bg-gray-50">
+      <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+        <h2 class="text-3xl font-bold mb-6 animate-fade-in">
+          FAQ & troubleshooting
+        </h2>
+        <div class="space-y-6">
+          <div class="animate-fade-in" style="animation-delay: 0.1s">
+            <h3 class="text-xl font-semibold mb-2">App won’t open</h3>
+            <p class="text-gray-600">
+              Right‑click the app in Applications → Open → Open (unsigned first
+              run).
+            </p>
+          </div>
+          <div class="animate-fade-in" style="animation-delay: 0.2s">
+            <h3 class="text-xl font-semibold mb-2">
+              No screenshots are captured
+            </h3>
+            <p class="text-gray-600">
+              Grant Screen Recording permission: System Settings → Privacy &
+              Security → Screen Recording.
+            </p>
+          </div>
+          <div class="animate-fade-in" style="animation-delay: 0.3s">
+            <h3 class="text-xl font-semibold mb-2">
+              Function keys don’t trigger
+            </h3>
+            <p class="text-gray-600">
+              System Settings → Keyboard → enable “Use F1, F2, etc. keys as
+              standard function keys”.
+            </p>
+          </div>
+          <div class="animate-fade-in" style="animation-delay: 0.4s">
+            <h3 class="text-xl font-semibold mb-2">Blurry output?</h3>
+            <p class="text-gray-600">
+              ShotBar captures at native resolution. Check display scaling
+              settings if output appears soft.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Open Source Section -->
+    <section class="py-20 bg-white">
+      <div
+        class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center animate-fade-in"
+      >
+        <h2 class="text-3xl font-bold mb-6">Open‑source & MIT licensed</h2>
+        <p class="text-lg mb-8 text-gray-600">
+          Contributions welcome — new capture modes, formats, accessibility, and
+          performance work.
+        </p>
+        <a
+          href="https://github.com/aneesahammed/ShotBarApp/discussions"
+          class="px-6 py-3 bg-black text-white rounded-md hover:bg-black/90 transition duration-300 ease-in-out"
+          >Join discussions →</a
+        >
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="py-6 bg-gray-50 border-t">
+      <div
+        class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-sm text-gray-600"
+      >
+        <p>Made with ❤️ for the macOS community • MIT</p>
+        <div class="mt-2 space-x-4">
           <a
             href="https://github.com/aneesahammed/ShotBarApp/issues"
-            target="_blank"
-            rel="noopener"
+            class="hover:text-black"
             >Report bug</a
           >
           <span>•</span>
           <a
             href="https://github.com/aneesahammed/ShotBarApp/releases"
-            target="_blank"
-            rel="noopener"
+            class="hover:text-black"
             >Releases</a
           >
           <span>•</span>
-          <a
-            href="#privacy"
-            onclick="alert('Privacy: ShotBar does not collect personal data. All processing happens locally on-device.'); return false;"
-            >Privacy</a
-          >
+          <a href="#" class="hover:text-black">Privacy</a>
         </div>
       </div>
     </footer>
-
-    <script>
-      // simple reveal-on-scroll for micro delight
-      const io = new IntersectionObserver(
-        (entries) => {
-          entries.forEach((e) => {
-            if (e.isIntersecting) e.target.classList.add("revealed");
-          });
-        },
-        { threshold: 0.08 }
-      );
-      document.querySelectorAll(".reveal").forEach((el) => io.observe(el));
-    </script>
-
-    <!-- Structured data for SEO -->
-    <script type="application/ld+json">
-      {
-        "@context": "https://schema.org",
-        "@type": "SoftwareApplication",
-        "name": "ShotBar",
-        "applicationCategory": "UtilitiesApplication",
-        "operatingSystem": "macOS 15.5+",
-        "description": "A modern, lightweight macOS screenshot utility with menu bar UI and custom hotkeys.",
-        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-        "url": "https://shotbar.example.com/",
-        "downloadUrl": "https://github.com/aneesahammed/ShotBarApp/releases/latest",
-        "softwareVersion": "1.0.0"
-      }
-    </script>
   </body>
 </html>
