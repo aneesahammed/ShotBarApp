@@ -277,7 +277,8 @@ final class ScreenshotManager: ObservableObject {
         let fullImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
         
         // Now crop to the selection area
-        let cropRect = CGRect(x: pixelX, y: pixelYFromTop, width: pixelW, height: pixelH)
+        let cropY = fullImage.height - pixelYFromTop - pixelH
+        let cropRect = CGRect(x: pixelX, y: cropY, width: pixelW, height: pixelH)
         
         guard let croppedImage = fullImage.cropping(to: cropRect) else {
             throw NSError(domain: "ShotBar", code: -12, userInfo: [NSLocalizedDescriptionKey: "Failed to crop image"])
@@ -337,33 +338,24 @@ final class ScreenshotManager: ObservableObject {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         
-        // Build an NSBitmapImageRep with a logical size that encodes the correct scale (points)
-        let imageRep = NSBitmapImageRep(cgImage: cgImage)
         let scale = max(self.lastCapturePixelsPerPoint, 1.0)
         let logicalSize = NSSize(width: CGFloat(cgImage.width) / scale, height: CGFloat(cgImage.height) / scale)
+        
+        let imageRep = NSBitmapImageRep(cgImage: cgImage)
         imageRep.size = logicalSize
         
-        // Create NSImage carrying the rep and size metadata
         let nsImage = NSImage(size: logicalSize)
         nsImage.addRepresentation(imageRep)
         
-        // Prepare PNG data with DPI metadata matching the scale
-        let targetDPI = 72.0 * Double(scale)
-        guard let pngData = createHighQualityPNGData(from: cgImage, dpi: targetDPI) else {
-            DispatchQueue.main.async { [weak self] in
-                self?.toast.show(text: "Failed to create clipboard data")
-            }
-            return
+        // Write TIFF data using standard NSImage method
+        if let tiffData = nsImage.tiffRepresentation {
+            pasteboard.setData(tiffData, forType: .tiff)
         }
         
-        // Write both TIFF (with explicit DPI) and PNG (with DPI) to clipboard
-        pasteboard.declareTypes([.tiff, .png], owner: nil)
-        if let tiffData = createHighQualityTIFFData(from: cgImage, dpi: targetDPI) {
-            pasteboard.setData(tiffData, forType: .tiff)
-        } else if let tiffFallback = nsImage.tiffRepresentation {
-            pasteboard.setData(tiffFallback, forType: .tiff)
+        // Write PNG data using rep with no compression for high quality
+        if let pngData = imageRep.representation(using: .png, properties: [.compressionFactor: 0.0]) {
+            pasteboard.setData(pngData, forType: .png)
         }
-        pasteboard.setData(pngData, forType: .png)
         
         DispatchQueue.main.async { [weak self] in
             self?.toast.show(text: "Screenshot copied to clipboard")
