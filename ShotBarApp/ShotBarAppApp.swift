@@ -12,8 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupMenuBar()
         setupMainMenu()
         
-        // Ensure the app shows in dock and has proper icon
-        NSApp.setActivationPolicy(.regular)
+        // Menu bar only app - no dock icon
+        NSApp.setActivationPolicy(.accessory)
     }
     
     private func setupMenuBar() {
